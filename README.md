@@ -28,4 +28,4 @@ SSH Controls does NOT:
 
 * discover SSH **host keys**: SSH Controls will silently ignore any questions related to host keys discoveries upon the first connection to client hosts. If you are managing a large number of client hosts, you may want to prepare a known_hosts file in advance or else let the host keys be added automatically upon first public key distribution.
 
-More documentation can be found at More documentation can be found at http://www.kudos.be/Projects/SSH_Controls.html
+More documentation can be found at http://www.kudos.be/Projects/SSH_Controls.html
