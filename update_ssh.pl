@@ -40,7 +40,7 @@ use Pod::Usage;
 
 # ------------------------- CONFIGURATION starts here -------------------------
 # define the V.R.F (version/release/fix)
-my $MY_VRF = "1.0.1";
+my $MY_VRF = "1.0.2";
 # name of global configuration file (no path, must be located in the script directory)
 my $global_config_file = "update_ssh.conf";
 # name of localized configuration file (no path, must be located in the script directory)
@@ -521,7 +521,7 @@ unless ($preview) {
                 $has_selinux = 1;
             } 
             # figure out RHEL version (via lsb_release or /etc/redhat-release)
-            $linux_version = qx#/usr/bin/lsb_release -rs 2>/dev/null | /bin/cut -f1 -d'.'#;
+            $linux_version = qx#/usr/bin/lsb_release -rs 2>/dev/null | /usr/bin/cut -f1 -d'.'#;
             chomp ($linux_version);
             if (not (defined ($linux_version)) or $linux_version eq "") {
                 my $release_string;
@@ -761,3 +761,4 @@ S<       >Show version of the script.
 
 @(#) 2014-12-04: VRF 1.0.0: first version [Patrick Van der Veken]
 @(#) 2014-12-16: VRF 1.0.1: added SELinux context, new config option 'selinux_context' [Patrick Van der Veken]
+@(#) 2015-08-08: VRF 1.0.2: small fix for 'cut' command [Patrick Van der Veken]
