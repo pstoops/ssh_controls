@@ -29,6 +29,8 @@
 #******************************************************************************
 
 use strict;
+use Net::Domain qw(hostfqdn hostname);
+use POSIX qw(uname);
 use Data::Dumper;
 use Getopt::Long;
 use Pod::Usage;
@@ -40,7 +42,7 @@ use Pod::Usage;
 
 # ------------------------- CONFIGURATION starts here -------------------------
 # define the V.R.F (version/release/fix)
-my $MY_VRF = "1.0.2";
+my $MY_VRF = "1.1.0";
 # name of global configuration file (no path, must be located in the script directory)
 my $global_config_file = "update_ssh.conf";
 # name of localized configuration file (no path, must be located in the script directory)
@@ -51,10 +53,10 @@ my %selinux_contexts = ( '5' => 'sshd_key_t',
                          '7' => 'ssh_home_t');
 # ------------------------- CONFIGURATION ends here --------------------------- 
 # initialize variables
-my ($debug, $verbose, $preview, $remove, $global) = (0,0,0,0,0);
+my ($debug, $verbose, $preview, $remove, $global, $use_fqdn) = (0,0,0,0,0,0);
 my (@config_files, @zombie_files, $access_dir, $blacklist_file);
-my (%options, @accounts, %aliases, %keys, %access, @blacklist);
-my ($os, $host, $hostname, $run_dir);
+my (%options, @uname, @accounts, %aliases, %keys, %access, @blacklist);
+my ($os, $hostname, $run_dir);
 my ($selinux_status, $selinux_context, $linux_version, $has_selinux) = ("","","",0);
 $|++;
 
@@ -94,6 +96,10 @@ sub parse_config_file {
         if (/^\s*$/ || /^#/) {
             next;
         } else {
+            if (/^\s*use_fqdn\s*=\s*([0-9]+)\s*$/) {
+                $use_fqdn = $1;
+                do_log ("DEBUG: picking up setting: use_fqdn=${use_fqdn}");
+            }
             if (/^\s*access_dir\s*=\s*([0-9A-Za-z_\-\.\/~]+)\s*$/) {
                 $access_dir = $1;
                 do_log ("DEBUG: picking up setting: access_dir=${access_dir}");
@@ -215,8 +221,8 @@ if ($options{'debug'}) {
 $verbose = 1 if ($options{'verbose'});
 
 # what am I?
-$os = `uname`;
-chomp ($os);
+@uname = uname();
+$os = $uname[0];
 # who am I?
 unless ($preview and $global) {
     if ($< != 0) {
@@ -225,12 +231,10 @@ unless ($preview and $global) {
     }
 }
 # where am I?
-$host = `hostname`;
-chomp ($host);
-if ($host =~ /\./) {
-     ($hostname) = $host =~ /(.*?)\./;
+unless ($use_fqdn) {
+    $hostname = hostfqdn();
 } else {
-     $hostname = $host;
+    $hostname = hostname();
 }
 $0 =~ /^(.+[\\\/])[^\\\/]+[\\\/]*$/;
 my $run_dir = $1 || ".";
@@ -549,7 +553,11 @@ unless ($preview) {
             } else {
                 $selinux_context = $selinux_contexts{$linux_version};
             }
-            do_log ("INFO: runtime info: OS major version $linux_version, SELinux context $selinux_context on $hostname");        
+            if ($has_selinux) {
+				do_log ("INFO: runtime info: OS major version $linux_version, SELinux context $selinux_context on $hostname");
+			} else {
+				do_log ("INFO: runtime info: OS major version $linux_version on $hostname");
+			}   
             last SWITCH_OS; 
         };
     }
@@ -762,3 +770,4 @@ S<       >Show version of the script.
 @(#) 2014-12-04: VRF 1.0.0: first version [Patrick Van der Veken]
 @(#) 2014-12-16: VRF 1.0.1: added SELinux context, new config option 'selinux_context' [Patrick Van der Veken]
 @(#) 2015-08-08: VRF 1.0.2: small fix for 'cut' command [Patrick Van der Veken]
+@(#) 2015-08-15: VRF 1.1.0: replace uname/hostname syscalls, now support for FQDN via $use_fqdn, other fixes [Patrick Van der Veken]

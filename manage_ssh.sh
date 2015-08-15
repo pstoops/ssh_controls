@@ -20,11 +20,11 @@
 # DOES: performs basic functions for SSH controls: update SSH keys locally or
 #       remote, create SSH key fingerprints or distribute the SSH controls files
 # EXPECTS: (see --help for more options)
-# REQUIRES: check_config(), check_logging(), check_params(), check_setup(),
-#           check_syntax(), count_fields(), die(), display_usage(), 
+# REQUIRES: check_config(), check_logging(), check_params(), check_root_user(),
+#           check_setup(), check_syntax(), count_fields(), die(), display_usage(), 
 #           distribute2host(), do_cleanup(), fix2host(), get_linux_version(), 
 #           log(), resolve_host(), sftp_file(), update2host(), 
-#           update_fingerprints(), warn()
+#           update_fingerprints(), wait_for_children(), warn()
 #           For other pre-requisites see the documentation in display_usage()
 #
 # @(#) HISTORY:
@@ -35,6 +35,9 @@
 # @(#) 2015-02-03: use 'sudo -n' (VRF 1.1.2) [Patrick Van der Veken]
 # @(#) 2015-04-10: fix in --fix-local routine (VRF 1.1.3) [Patrick Van der Veken]
 # @(#) 2015-05-16: added SSH_OWNER_GROUP (VRF 1.1.4) [Patrick Van der Veken]
+# @(#) 2015-08-15: moved essential configuration items of the script into a
+# @(#)             separate configuration file (global/local), fix in 
+# @(#)             wait_for_children (VRF 1.2.0) [Patrick Van der Veken]
 # -----------------------------------------------------------------------------
 # DO NOT CHANGE THIS FILE UNLESS YOU KNOW WHAT YOU ARE DOING!
 #******************************************************************************
@@ -44,32 +47,15 @@
 #******************************************************************************
 
 # ------------------------- CONFIGURATION starts here -------------------------
+# Below configuration values should not be changed. Use the GLOBAL_CONFIG_FILE
+# or LOCAL_CONFIG_FILE instead
+
 # define the V.R.F (version/release/fix)
-MY_VRF="1.1.4"
-# name of the user account performing the SSH controls copies
-# (leave blank for current user)
-SSH_TRANSFER_USER=""
-# name of the OS group that should own the SSH controls files
-SSH_OWNER_GROUP="sshadmin"
-# extra arguments/options for the SFTP command
-SFTP_ARGS="-o StrictHostKeyChecking=no -o ConnectTimeout=10 -b - "
-# extra arguments/options for the SSH command
-SSH_ARGS="-o StrictHostKeyChecking=no -o ConnectTimeout=10 -n"
-# location of the local SSH controls directory
-LOCAL_DIR="/etc/ssh_master"
-# location of the remote SSH controls directory
-REMOTE_DIR="/etc/ssh_controls/holding"
-# name of the user account performing the SSH controls update
-# (leave blank for current user but user should have remote sudo root privs)
-SSH_UPDATE_USER=""
-# options to pass to manage_ssh.sh when executing a key update
-SSH_UPDATE_OPTS="--verbose --remove"
-# maximum number of background process to spawn (~maxuprc, ~nstrpty etc)
-MAX_BACKGROUND_PROCS=30
-# location of the backup directory (for configuration & key files)
-BACKUP_DIR="${LOCAL_DIR}/backup"
-# location of log directory (default), see --log-dir)
-LOG_DIR="/var/log"
+MY_VRF="1.2.0"
+# name of the global configuration file (script)
+GLOBAL_CONFIG_FILE="manage_ssh.conf"
+# name of the local configuration file (script)
+LOCAL_CONFIG_FILE="manage_ssh.conf.local"
 # location of temporary working storage
 TMP_DIR="/var/tmp"
 # ------------------------- CONFIGURATION ends here ---------------------------
@@ -322,7 +308,8 @@ if (( ARG_ACTION == 1 || ARG_ACTION == 2 || ARG_ACTION == 4 ))
 then
     for FILE in "${LOCAL_DIR}/update_ssh.pl" \
                 "${LOCAL_DIR}/update_ssh.conf" \
-                "${SCRIPT_DIR}/${SCRIPT_NAME}"
+                "${SCRIPT_DIR}/${SCRIPT_NAME}" \
+                "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}"
     do
         if [[ ! -r "${FILE}" ]]
         then
@@ -464,6 +451,8 @@ Note 1: distribute and update actions are run in parallel across a maximum of
 Note 2: for fix and update actions: make sure correct 'sudo' rules are setup 
         on the target systems to allow the SSH controls script to run with 
         elevated privileges.
+        
+Note 3: only GLOBAL configuration files will be distributed to target hosts.
 
 EOT
 
@@ -491,7 +480,8 @@ for FILE in "${LOCAL_DIR}/access!660" \
             "${LOCAL_DIR}/alias!660" \
             "${LOCAL_DIR}/update_ssh.pl!770" \
             "${LOCAL_DIR}/update_ssh.conf!660" \
-            "${SCRIPT_DIR}/${SCRIPT_NAME}!770" 
+            "${SCRIPT_DIR}/${SCRIPT_NAME}!770" \
+            "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}!660"
 do              
     # sftp transfer
     sftp_file ${FILE} ${SERVER}
@@ -518,7 +508,7 @@ then
     log "keys are stored in a DIRECTORY, first merging all keys into ${TMP_MERGE_FILE}"
     cat ${KEYS_DIR}/* >${TMP_MERGE_FILE}
     # sftp transfer
-    sftp_file "${TMP_MERGE_FILE}!440" ${SERVER}
+    sftp_file "${TMP_MERGE_FILE}!640" ${SERVER}
     COPY_RC=$?
     if (( ! COPY_RC ))
     then
@@ -528,7 +518,7 @@ then
     fi
     [[ -d ${TMP_WORK_DIR} ]] && rm -rf ${TMP_WORK_DIR} 2>/dev/null
 else
-    sftp_file "${KEYS_FILE}!440" ${SERVER}
+    sftp_file "${KEYS_FILE}!640" ${SERVER}
     COPY_RC=$?
     if (( ! COPY_RC ))
     then
@@ -703,7 +693,7 @@ OLD_PWD=$(pwd) && cd ${TRANSFER_DIR}
 sftp ${SFTP_ARGS} ${SSH_TRANSFER_USER}@${TRANSFER_HOST} >/dev/null <<EOT
 cd ${REMOTE_DIR}
 put ${SOURCE_FILE}
-#chmod ${TRANSFER_PERMS} ${SOURCE_FILE}
+chmod ${TRANSFER_PERMS} ${SOURCE_FILE}
 EOT
 SFTP_RC=$?
 
@@ -814,10 +804,10 @@ do
         # the child might have already ended before we get here (caveat emptor)
         elif $(wait ${PID})
         then
-            log "child process ${PID} exited"
-        else
-            log "child process ${PID} exited"   
+            log "child process ${PID} exited [NOK]"
             WAIT_ERRORS=$(( WAIT_ERRORS + 1 ))
+        else
+            log "child process ${PID} exited [OK]"
         fi
     done
     # break loop if we no child PIDs left
@@ -948,6 +938,21 @@ do
     esac    
 done
 
+# check for configuration files (local overrides local)
+if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" || -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
+then
+	if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" ]]
+	then	
+		. "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}"
+	fi
+	if [[ -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
+	then
+		. "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}"
+	fi
+else
+	print -u2 "ERROR: could not find global or local configuration file"
+fi	
+
 # startup checks
 check_params && check_config && check_setup && check_logging
 
@@ -988,7 +993,7 @@ case ${ARG_ACTION} in
             then
                 # wait until all background processes are completed
                 wait_for_children ${PIDS} || \
-                    warn "$? background jobs failed to complete correctly"
+                    warn "$? background jobs (possibly) failed to complete correctly"
                 PIDS=''  
                 # reset max updates in background
                 COUNT=${MAX_BACKGROUND_PROCS}
@@ -996,7 +1001,7 @@ case ${ARG_ACTION} in
         done
         # final wait for background processes to be finished completely
         wait_for_children ${PIDS} || \
-            warn "$? background jobs failed to complete correctly"      
+            warn "$? background jobs (possibly) failed to complete correctly"      
 
         log "finished applying SSH controls remotely"
         ;;
@@ -1028,7 +1033,7 @@ case ${ARG_ACTION} in
             then
                 # wait until all background processes are completed
                 wait_for_children ${PIDS} || \
-                    warn "$? background jobs failed to complete correctly"
+                    warn "$? background jobs (possibly) failed to complete correctly"
                 PIDS=''
                 # reset max updates in background
                 COUNT=${MAX_BACKGROUND_PROCS}               
@@ -1036,7 +1041,7 @@ case ${ARG_ACTION} in
         done
         # final wait for background processes to be finished completely
         wait_for_children ${PIDS} || \
-            warn "$? background jobs failed to complete correctly"
+            warn "$? background jobs (possibly) failed to complete correctly"
         log "finished copying/distributing SSH controls"
         ;;
     3)  # create key fingerprints
@@ -1194,7 +1199,7 @@ case ${ARG_ACTION} in
             then
                 # wait until all background processes are completed
                 wait_for_children ${PIDS} || \
-                    warn "$? background jobs failed to complete correctly"
+                    warn "$? background jobs (possibly) failed to complete correctly"
                 PIDS=''
                 # reset max updates in background
                 COUNT=${MAX_BACKGROUND_PROCS}
@@ -1202,7 +1207,7 @@ case ${ARG_ACTION} in
         done
         # final wait for background processes to be finished completely
         wait_for_children ${PIDS} || \
-            warn "$? background jobs failed to complete correctly"
+            warn "$? background jobs (possibly) failed to complete correctly"
         log "finished applying fixes to the remote SSH control repository"
         ;;
     7)  # dump the configuration namespace
