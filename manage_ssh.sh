@@ -810,7 +810,7 @@ do
             log "child process ${PID} exited [OK]"
         fi
     done
-    # break loop if we no child PIDs left
+    # break loop if we have no child PIDs left
     (($# > 0)) || break
     sleep 1     # required to avoid race conditions
 done
@@ -941,17 +941,17 @@ done
 # check for configuration files (local overrides local)
 if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" || -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
 then
-	if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" ]]
-	then	
-		. "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}"
-	fi
-	if [[ -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
-	then
-		. "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}"
-	fi
+    if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" ]]
+    then    
+        . "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}"
+    fi
+    if [[ -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
+    then
+        . "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}"
+    fi
 else
-	print -u2 "ERROR: could not find global or local configuration file"
-fi	
+    print -u2 "ERROR: could not find global or local configuration file"
+fi  
 
 # startup checks
 check_params && check_config && check_setup && check_logging
@@ -994,7 +994,7 @@ case ${ARG_ACTION} in
                 # wait until all background processes are completed
                 wait_for_children ${PIDS} || \
                     warn "$? background jobs (possibly) failed to complete correctly"
-                PIDS=''  
+                PIDS=''
                 # reset max updates in background
                 COUNT=${MAX_BACKGROUND_PROCS}
             fi
@@ -1036,7 +1036,7 @@ case ${ARG_ACTION} in
                     warn "$? background jobs (possibly) failed to complete correctly"
                 PIDS=''
                 # reset max updates in background
-                COUNT=${MAX_BACKGROUND_PROCS}               
+                COUNT=${MAX_BACKGROUND_PROCS}
             fi
         done
         # final wait for background processes to be finished completely

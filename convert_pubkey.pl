@@ -73,20 +73,20 @@ if ($options{'help'}) {
 # check file parameter
 if ($options{'file'}) {
     $key_file = $options{'file'};
-	unless (-f $key_file) {
-		die "ERROR: input file $key_file not found [$!]";
-	}
+    unless (-f $key_file) {
+        die "ERROR: input file $key_file not found [$!]";
+    }
 } else {
-		die "ERROR: missing value for --file parameter";
+        die "ERROR: missing value for --file parameter";
 }
 # check label parameter
 if ($options{'label'}) {
     $key_label = $options{'label'};
-	if (not (defined ($key_label) or $key_label eq "")) {
-		die "ERROR: key label not defined";
-	}
+    if (not (defined ($key_label) or $key_label eq "")) {
+        die "ERROR: key label not defined";
+    }
 } else {
-		die "ERROR: missing value for --label parameter";
+        die "ERROR: missing value for --label parameter";
 }
 
 # -----------------------------------------------------------------------------
@@ -99,33 +99,33 @@ close (KEY_FILE);
 
 # determine type of key
 if (grep { /$key_algo/ } @key_file) {
-	$key_type = 1;
+    $key_type = 1;
 } else {
-	$key_type = 2;
+    $key_type = 2;
 }
 
 # process key
 SWITCH: {
-	$key_type ==  1 && do {
-		# 1 line only!!
-		foreach (@key_file) {
-			chomp;	
-			($key_algo, $key_line) = split (/ /);
-		};
-		last SWITCH;	
-	};
-	$key_type ==  2 && do {
-		foreach (@key_file) {
-			chomp;
-			# skip BEGIN/END lines
-			next if (/^----/);
-			# skip Comment field
-			next if (/^Comment/);
-			$key_line .= $_;
-		}
-	last SWITCH;
-	};	
-}	
+    $key_type ==  1 && do {
+        # 1 line only!!
+        foreach (@key_file) {
+            chomp;  
+            ($key_algo, $key_line) = split (/ /);
+        };
+        last SWITCH;    
+    };
+    $key_type ==  2 && do {
+        foreach (@key_file) {
+            chomp;
+            # skip BEGIN/END lines
+            next if (/^----/);
+            # skip Comment field
+            next if (/^Comment/);
+            $key_line .= $_;
+        }
+    last SWITCH;
+    };  
+}   
 
 # mangle space in label
 $key_label =~ tr/ /_/s;
@@ -152,7 +152,7 @@ convert_pubkey.pl - converts public keys for SSH controls format (SSH-RSA)
 =head1 SYNOPSIS
 
     update_ssh.pl -f|--file=<public_key> -l|--label=<label_name>
-                  [-h|--help] 	
+                  [-h|--help]   
                   [-V|--version]
 
                  

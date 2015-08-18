@@ -545,7 +545,7 @@ unless ($preview) {
                         last SWITCH_RELEASE;
                     };
                 }
-			}
+            }
             # use fall back in case we cannot determine the version
             if (not (defined ($linux_version)) or $linux_version eq "") {               
                 $selinux_context = 'etc_t';
@@ -554,10 +554,10 @@ unless ($preview) {
                 $selinux_context = $selinux_contexts{$linux_version};
             }
             if ($has_selinux) {
-				do_log ("INFO: runtime info: OS major version $linux_version, SELinux context $selinux_context on $hostname");
-			} else {
-				do_log ("INFO: runtime info: OS major version $linux_version on $hostname");
-			}   
+                do_log ("INFO: runtime info: OS major version $linux_version, SELinux context $selinux_context on $hostname");
+            } else {
+                do_log ("INFO: runtime info: OS major version $linux_version on $hostname");
+            }   
             last SWITCH_OS; 
         };
     }
