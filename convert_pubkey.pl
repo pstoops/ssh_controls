@@ -151,9 +151,9 @@ convert_pubkey.pl - converts public keys for SSH controls format (SSH-RSA)
 
 =head1 SYNOPSIS
 
-    update_ssh.pl -f|--file=<public_key> -l|--label=<label_name>
-                  [-h|--help]   
-                  [-V|--version]
+    convert_pubkey.pl -f|--file=<public_key> -l|--label=<label_name>
+                      [-h|--help]   
+                      [-V|--version]
 
                  
 =head1 DESCRIPTION
