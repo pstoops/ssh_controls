@@ -42,7 +42,7 @@ use Pod::Usage;
 
 # ------------------------- CONFIGURATION starts here -------------------------
 # define the V.R.F (version/release/fix)
-my $MY_VRF = "1.1.0";
+my $MY_VRF = "1.2.0";
 # name of global configuration file (no path, must be located in the script directory)
 my $global_config_file = "update_ssh.conf";
 # name of localized configuration file (no path, must be located in the script directory)
@@ -55,7 +55,7 @@ my %selinux_contexts = ( '5' => 'sshd_key_t',
 # initialize variables
 my ($debug, $verbose, $preview, $remove, $global, $use_fqdn) = (0,0,0,0,0,0);
 my (@config_files, @zombie_files, $access_dir, $blacklist_file);
-my (%options, @uname, @accounts, %aliases, %keys, %access, @blacklist);
+my (%options, @uname, @pwgetent, @accounts, %aliases, %keys, %access, @blacklist);
 my ($os, $hostname, $run_dir);
 my ($selinux_status, $selinux_context, $linux_version, $has_selinux) = ("","","",0);
 $|++;
@@ -220,31 +220,14 @@ if ($options{'debug'}) {
 }
 $verbose = 1 if ($options{'verbose'});
 
-# what am I?
-@uname = uname();
-$os = $uname[0];
-# who am I?
-unless ($preview and $global) {
-    if ($< != 0) {
-        do_log ("ERROR: script must be invoked as user 'root' [$hostname]") 
-        and exit (1);
-    }
-}
-# where am I?
-unless ($use_fqdn) {
-    $hostname = hostfqdn();
-} else {
-    $hostname = hostname();
-}
-$0 =~ /^(.+[\\\/])[^\\\/]+[\\\/]*$/;
-my $run_dir = $1 || ".";
-$run_dir =~ s#/$##;     # remove trailing slash
-
-do_log ("INFO: runtime info: ".getpwuid ($<)."; $hostname\@${run_dir}; Perl v$]"); 
-
 # -----------------------------------------------------------------------------
 # check/process configuration files, environment checks
 # -----------------------------------------------------------------------------
+
+# where am I? (1/2)
+$0 =~ /^(.+[\\\/])[^\\\/]+[\\\/]*$/;
+my $run_dir = $1 || ".";
+$run_dir =~ s#/$##;     # remove trailing slash
 
 # don't do anything without configuration file(s)
 do_log ("INFO: parsing configuration file(s) ...");
@@ -287,24 +270,41 @@ unless ($preview and $global) {
     }
 }
 
-# -----------------------------------------------------------------------------
-# collect local user accounts from /etc/passwd
-# result: %accounts
-# -----------------------------------------------------------------------------
-
-do_log ("INFO: reading user accounts from /etc/passwd ...");
-
-open (PASSWD, "/etc/passwd")
-    or do_log ("ERROR: cannot read PASSWD file [$! $hostname]") and exit (1);
-while (<PASSWD>) {
-    
-    my @pw_entry;
-
-    chomp ();
-    @pw_entry = split (/:/);
-    push (@accounts, $pw_entry[0]);
+# what am I?
+@uname = uname();
+$os = $uname[0];
+# who am I?
+unless ($preview and $global) {
+    if ($< != 0) {
+        do_log ("ERROR: script must be invoked as user 'root' [$hostname]") 
+        and exit (1);
+    }
 }
-close (PASSWD);
+# where am I? (2/2)
+if ($use_fqdn) {
+    $hostname = hostfqdn();
+} else {
+    $hostname = hostname();
+}
+
+do_log ("INFO: runtime info: ".getpwuid ($<)."; ${hostname}\@${run_dir}; Perl v$]");
+
+# -----------------------------------------------------------------------------
+# collect user accounts via getpwent()
+# result: @accounts
+# -----------------------------------------------------------------------------
+
+do_log ("INFO: reading user accounts from pwgetent ...");
+
+while (@pwgetent = getpwent()) {
+
+    push (@accounts, $pwgetent[0]);
+}
+
+# remove duplicates (which should not happen (!) but local, LDAP and accounts 
+# from other sources might trample over each other)
+my %uniq_accounts = map { $_, 0 } @accounts;
+@accounts = keys %uniq_accounts;
 
 do_log ("INFO: ".scalar (@accounts)." user accounts found on $hostname");
 print Dumper (\@accounts) if $debug;
@@ -339,7 +339,7 @@ print Dumper (\%aliases) if $debug;
 # string to resolve_aliases so don't forget to smash everything back together
 # first.
 foreach my $key (keys (%aliases)) {
-    
+
     $aliases{$key} = [resolve_aliases (join (",", @{$aliases{$key}}))]; 
 }
 
@@ -563,7 +563,7 @@ unless ($preview) {
     }
 }
 
-# only add authorized_keys for existing local accounts, 
+# only add authorized_keys for existing accounts, 
 # otherwise revoke access if needed
 foreach my $account (sort (@accounts)) {
     
@@ -701,6 +701,8 @@ Following settings must be configured:
 
 =over 2
 
+=item * B<use_fqdn>       : whether to use short or FQDN host names
+
 =item * B<access_dir>     : target directory for allowed SSH public key files
 
 =item * B<blacklist_file> : location of the file with blacklisted SSH public keys
@@ -771,3 +773,4 @@ S<       >Show version of the script.
 @(#) 2014-12-16: VRF 1.0.1: added SELinux context, new config option 'selinux_context' [Patrick Van der Veken]
 @(#) 2015-08-08: VRF 1.0.2: small fix for 'cut' command [Patrick Van der Veken]
 @(#) 2015-08-15: VRF 1.1.0: replace uname/hostname syscalls, now support for FQDN via $use_fqdn, other fixes [Patrick Van der Veken]
+@(#) 2015-08-26: VRF 1.2.0: replace read of /etc/passwd by pwgetent() call, small and not so small fixes [Patrick Van der Veken]
