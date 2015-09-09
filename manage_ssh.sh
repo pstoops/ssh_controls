@@ -44,7 +44,9 @@
 # @(#) 2015-08-28: check_config() update (VRF 1.2.2) [Patrick Van der Veken]
 # @(#) 2015-09-04: fix in wait_for_children (VRF 1.2.3) [Patrick Van der Veken]
 # @(#) 2015-09-06: proper error checking in fix2host(), update2host() by using
-# @(#)             logc() (VRF 1.3.0) [Patrick Van der Veken
+# @(#)             logc() (VRF 1.3.0) [Patrick Van der Veken]
+# @(#) 2015-09-09: better handling of leading log sigils in die(), log(), logc()
+# @(#)             and warn(), fix in count_fields() (VRF 1.3.1) [Patrick Van der Veken]
 # -----------------------------------------------------------------------------
 # DO NOT CHANGE THIS FILE UNLESS YOU KNOW WHAT YOU ARE DOING!
 #******************************************************************************
@@ -58,7 +60,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the V.R.F (version/release/fix)
-MY_VRF="1.3.0"
+MY_VRF="1.3.1"
 # name of the global configuration file (script)
 GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -376,9 +378,9 @@ CHECK_DELIM="$2"
 
 NUM_FIELDS=$(print "${CHECK_LINE}" | awk -F "${CHECK_DELIM}" '{ print NF }')
 
-print $NUM_FIELDS
+print ${NUM_FIELDS}
 
-return ${NUM_FIELDS}
+return 0
 }
 
 # -----------------------------------------------------------------------------
@@ -392,16 +394,38 @@ then
     then
         print - "$*" | while read LOG_LINE
         do
-            # filter leading 'ERROR:'
-            LOG_LINE="${LOG_LINE#ERROR: *}"
-            print "${NOW}: ERROR: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*)
+                    LOG_LINE="${LOG_LINE#INFO: *}"
+                    LOG_SIGIL="INFO"
+                    ;;
+                WARN:*)
+                    LOG_LINE="${LOG_LINE#WARN: *}"
+                    LOG_SIGIL="WARN"
+                    ;;
+                ERROR:*)
+                    LOG_LINE="${LOG_LINE#ERROR: *}"
+                    LOG_SIGIL="ERROR"
+                    ;;
+                *)
+                    LOG_SIGIL="ERROR"
+                    ;;
+            esac
+            print "${NOW}: ${LOG_SIGIL}: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
         done
     fi
     print - "$*" | while read LOG_LINE
     do
-        # filter leading 'ERROR:'
-        LOG_LINE="${LOG_LINE#ERROR: *}"
-        print -u2 "ERROR:" "${LOG_LINE}"
+        # check for leading log sigils and retain them
+        case "${LOG_LINE}" in
+            INFO:*|WARN:*|ERROR*)
+                print "${LOG_LINE}"
+                ;;
+            *)
+                print "ERROR:" "${LOG_LINE}"
+                ;;
+        esac
     done
 fi
 
@@ -670,18 +694,40 @@ then
     then
         print - "$*" | while read LOG_LINE
         do
-            # filter leading 'INFO:'
-            LOG_LINE="${LOG_LINE#INFO: *}"
-            print "${NOW}: INFO: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*)
+                    LOG_LINE="${LOG_LINE#INFO: *}"
+                    LOG_SIGIL="INFO"
+                    ;;
+                WARN:*)
+                    LOG_LINE="${LOG_LINE#WARN: *}"
+                    LOG_SIGIL="WARN"
+                    ;;
+                ERROR:*)
+                    LOG_LINE="${LOG_LINE#ERROR: *}"
+                    LOG_SIGIL="ERROR"
+                    ;;
+                *)
+                    LOG_SIGIL="INFO"
+                    ;;
+            esac
+            print "${NOW}: ${LOG_SIGIL}: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
         done
     fi
     if (( ARG_VERBOSE ))
     then
         print - "$*" | while read LOG_LINE
         do
-            # filter leading 'INFO:'
-            LOG_LINE="${LOG_LINE#INFO: *}"
-            print "INFO:" "${LOG_LINE}"
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*|WARN:*|ERROR*)
+                    print "${LOG_LINE}"
+                    ;;
+                *)
+                    print "INFO:" "${LOG_LINE}"
+                    ;;
+            esac
         done
     fi
 fi
@@ -704,18 +750,40 @@ then
     then
         print - "${LOG_STDIN}" | while read LOG_LINE
         do
-            # filter leading 'INFO:'
-            LOG_LINE="${LOG_LINE#INFO: *}"
-            print "${NOW}: INFO: [$$]:" "${LOG_LINE}" >> ${LOG_FILE}
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*)
+                    LOG_LINE="${LOG_LINE#INFO: *}"
+                    LOG_SIGIL="INFO"
+                    ;;
+                WARN:*)
+                    LOG_LINE="${LOG_LINE#WARN: *}"
+                    LOG_SIGIL="WARN"
+                    ;;
+                ERROR:*)
+                    LOG_LINE="${LOG_LINE#ERROR: *}"
+                    LOG_SIGIL="ERROR"
+                    ;;
+                *)
+                    LOG_SIGIL="INFO"
+                    ;;
+            esac
+            print "${NOW}: ${LOG_SIGIL}: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
         done
     fi
     if (( ARG_VERBOSE ))
     then
         print - "${LOG_STDIN}" | while read LOG_LINE
         do
-            # filter leading 'INFO:'
-            LOG_LINE="${LOG_LINE#INFO: *}"
-            print "INFO:" "${LOG_LINE}"
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*|WARN:*|ERROR*)
+                    print "${LOG_LINE}"
+                    ;;
+                *)
+                    print "INFO:" "${LOG_LINE}"
+                    ;;
+            esac
         done
     fi
 fi
@@ -727,18 +795,39 @@ then
     then
         print - "$*" | while read LOG_LINE
         do
-            # filter leading 'INFO:'
-            LOG_LINE="${LOG_LINE#INFO: *}"
-            print "${NOW}: INFO: [$$]:" "${LOG_LINE}" >> ${LOG_FILE}
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*)
+                    LOG_LINE="${LOG_LINE#INFO: *}"
+                    LOG_SIGIL="INFO"
+                    ;;
+                WARN:*)
+                    LOG_LINE="${LOG_LINE#WARN: *}"
+                    LOG_SIGIL="WARN"
+                    ;;
+                ERROR:*)
+                    LOG_LINE="${LOG_LINE#ERROR: *}"
+                    LOG_SIGIL="ERROR"
+                    ;;
+                *)
+                    LOG_SIGIL="INFO"
+                    ;;
+            esac
+            print "${NOW}: ${LOG_SIGIL}: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
         done
     fi
     if (( ARG_VERBOSE != 0 ))
     then
         print - "$*" | while read LOG_LINE
         do
-            # filter leading 'INFO:'
-            LOG_LINE="${LOG_LINE#INFO: *}"
-            print "INFO:" "${LOG_LINE}"
+            case "${LOG_LINE}" in
+                INFO:*|WARN:*|ERROR*)
+                    print "${LOG_LINE}"
+                    ;;
+                *)
+                    print "INFO:" "${LOG_LINE}"
+                    ;;
+            esac
         done
     fi
 fi
@@ -933,18 +1022,40 @@ then
     then
         print - "$*" | while read LOG_LINE
         do
-            # filter leading 'WARN:'
-            LOG_LINE="${LOG_LINE#WARN: *}"
-            print "${NOW}: WARN: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*)
+                    LOG_LINE="${LOG_LINE#INFO: *}"
+                    LOG_SIGIL="INFO"
+                    ;;
+                WARN:*)
+                    LOG_LINE="${LOG_LINE#WARN: *}"
+                    LOG_SIGIL="WARN"
+                    ;;
+                ERROR:*)
+                    LOG_LINE="${LOG_LINE#ERROR: *}"
+                    LOG_SIGIL="ERROR"
+                    ;;
+                *)
+                    LOG_SIGIL="WARN"
+                    ;;
+            esac
+            print "${NOW}: ${LOG_SIGIL}: [$$]:" "${LOG_LINE}" >>${LOG_FILE}
         done
     fi
     if (( ARG_VERBOSE ))
     then
         print - "$*" | while read LOG_LINE
         do
-            # filter leading 'WARN:'
-            LOG_LINE="${LOG_LINE#WARN: *}"
-            print "WARN:" "${LOG_LINE}"
+            # check for leading log sigils and retain them
+            case "${LOG_LINE}" in
+                INFO:*|WARN:*|ERROR*)
+                    print "${LOG_LINE}"
+                    ;;
+                *)
+                    print "WARN:" "${LOG_LINE}"
+                    ;;
+            esac
         done
     fi
 fi
