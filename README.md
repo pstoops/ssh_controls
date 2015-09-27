@@ -17,6 +17,8 @@ SSH Controls is a light-weight SSH **public key** distribution & management fram
 
 * allows compromised public keys to be **blacklisted**: SSH Controls will deny the use of public keys that have been administrative blacklisted. Blacklisting happens on the SSH master and is applied to all client hosts.
 
+* can discover host public keys to (re)create `known_hosts` file(s) for a large amount of hosts
+
 * requires **no client agent** component and is **stateless**: SSH Controls performs operations by pushing keys or commands to client hosts. Update processes on the client hosts will only be started on-demand. If the SSH master is - for whatever reason - unavailable then active keys on a client host remain in place and logons are still possible.
 
 * is **easy** to **configure** and **maintain** (command-line based): the configuration is stored in a limited number of flat files and be easily updated. A very rudimentary syntax checking facility is also available to check the consistency of the most important (master) configuration files.
