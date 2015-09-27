@@ -21,9 +21,9 @@
 #       remote, create SSH key fingerprints or distribute the SSH controls files
 # EXPECTS: (see --help for more options)
 # REQUIRES: check_config(), check_logging(), check_params(), check_root_user(),
-#           check_setup(), check_syntax(), count_fields(), die(), display_usage(), 
-#           distribute2host(), do_cleanup(), fix2host(), get_linux_version(), 
-#           log(), logc(), resolve_host(), sftp_file(), update2host(), 
+#           check_setup(), check_syntax(), count_fields(), die(), display_usage(),
+#           distribute2host(), do_cleanup(), fix2host(), get_linux_version(),
+#           log(), logc(), resolve_host(), sftp_file(), update2host(),
 #           update_fingerprints(), wait_for_children(), warn()
 #           For other pre-requisites see the documentation in display_usage()
 #
@@ -36,7 +36,7 @@
 # @(#) 2015-04-10: fix in --fix-local routine (VRF 1.1.3) [Patrick Van der Veken]
 # @(#) 2015-05-16: added SSH_OWNER_GROUP (VRF 1.1.4) [Patrick Van der Veken]
 # @(#) 2015-08-15: moved essential configuration items of the script into a
-# @(#)             separate configuration file (global/local), fix in 
+# @(#)             separate configuration file (global/local), fix in
 # @(#)             wait_for_children (VRF 1.2.0) [Patrick Van der Veken]
 # @(#) 2015-08-26: added DO_SFTP_CHMOD configuration parameter to avoid
 # @(#)             setstat failures with sftp_file() when remote file
@@ -51,6 +51,8 @@
 # @(#) 2015-09-15: small fix in wait_for_children() (VRF 1.3.2) [Patrick Van der Veken]
 # @(#) 2015-09-23: added $GLOBAL_CONFIG_FILE to fix ownership/permissions routine
 # @(#)             (VRF 1.3.3) [Patrick Van der Veken]
+# @(#) 2015-09-27: added SSH host keys discovery, re-assigned '-d' command-line
+# @(#)             option to this function (VRF 1.4.0) [Patrick Van der Veken]
 # -----------------------------------------------------------------------------
 # DO NOT CHANGE THIS FILE UNLESS YOU KNOW WHAT YOU ARE DOING!
 #******************************************************************************
@@ -64,7 +66,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the V.R.F (version/release/fix)
-MY_VRF="1.3.3"
+MY_VRF="1.4.0"
 # name of the global configuration file (script)
 GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -81,6 +83,7 @@ KEYS_FILE=""
 KEYS_DIR=""
 TARGETS_FILE=""
 FIX_CREATE=0
+CAN_DISCOVER_KEYS=0
 KEY_COUNT=0
 KEY_1024_COUNT=0
 KEY_2048_COUNT=0
@@ -145,6 +148,12 @@ then
         exit 1
     fi
 fi
+# SSH_KEYSCAN_BIN
+if [[ -z "${SSH_KEYSCAN_BIN}" ]]
+then
+    print -u2 "ERROR: no value for the SSH_KEYSCAN_BIN setting in the configuration file"
+    exit 1
+fi
 # MAX_BACKGROUND_PROCS
 if [[ -z "${MAX_BACKGROUND_PROCS}" ]]
 then
@@ -170,15 +179,15 @@ then
     then
         if [[ ! -w "${LOG_DIR}" ]]
         then
-            # switch off logging intelligently when needed for permission problems 
+            # switch off logging intelligently when needed for permission problems
             # since this script may run with root/non-root actions
             print -u2 "ERROR: unable to write to the log directory at ${LOG_DIR}, disabling logging"
-            ARG_LOG=0  
+            ARG_LOG=0
         fi
     else
         if [[ ! -w "${LOG_FILE}" ]]
-        then    
-            # switch off logging intelligently when needed for permission problems 
+        then
+            # switch off logging intelligently when needed for permission problems
             # since this script may run with root/non-root actions
             print -u2 "ERROR: unable to write to the log file at ${LOG_FILE}, disabling logging"
             ARG_LOG=0
@@ -193,7 +202,7 @@ return 0
 function check_params
 {
 # -- ALL
-if (( ARG_ACTION < 1 || ARG_ACTION > 9 ))
+if (( ARG_ACTION < 1 || ARG_ACTION > 10 ))
 then
     display_usage
     exit 0
@@ -207,7 +216,7 @@ then
         exit 1
     else
         FIX_DIR="${ARG_FIX_DIR}"
-    fi    
+    fi
 fi
 # --local-dir
 if [[ -n "${ARG_LOCAL_DIR}" ]]
@@ -218,7 +227,7 @@ then
         exit 1
     else
         LOCAL_DIR="${ARG_LOCAL_DIR}"
-    fi    
+    fi
 fi
 # --log-dir
 [[ -z "${ARG_LOG_DIR}" ]] || LOG_DIR="${ARG_LOG_DIR}"
@@ -278,11 +287,11 @@ do
     if [[ ! -r "${FILE}" ]]
     then
         print -u2 "ERROR: cannot read file ${FILE}"
-        exit 1    
+        exit 1
     fi
 done
 # check for basic SSH control file(s): targets, /var/tmp/targets.$USER (or $TMP_FILE)
-if (( ARG_ACTION == 1 || ARG_ACTION == 2 || ARG_ACTION == 6 ))
+if (( ARG_ACTION == 1 || ARG_ACTION == 2 || ARG_ACTION == 6 || ARG_ACTION == 10 ))
 then
     if [[ -z "${ARG_TARGETS}" ]]
     then
@@ -290,12 +299,12 @@ then
         if [ \( ! -r "${TARGETS_FILE}" \) -a \( ! -r "/var/tmp/targets.${USER}" \) ]
         then
             print -u2 "ERROR: cannot read file ${TARGETS_FILE} nor /var/tmp/targets.${USER}"
-            exit 1    
+            exit 1
         fi
         # override default targets file
         [[ -r "/var/tmp/targets.${USER}" ]] && TARGETS_FILE="/var/tmp/targets.${USER}"
     else
-        TARGETS_FILE=${TMP_FILE}    
+        TARGETS_FILE=${TMP_FILE}
     fi
 fi
 # check for basic SSH control file(s): keys, keys.d/*
@@ -309,19 +318,19 @@ then
     if [[ ! -r "${KEYS_DIR}" ]]
     then
         print -u2 "ERROR: unable to read directory ${KEYS_DIR}"
-        exit 1    
-    fi  
+        exit 1
+    fi
 elif [[ -f "${LOCAL_DIR}/keys" ]]
 then
     KEYS_FILE="${LOCAL_DIR}/keys"
     if [[ ! -r "${KEYS_FILE}" ]]
     then
         print -u2 "ERROR: cannot read file ${KEYS_FILE}"
-        exit 1    
+        exit 1
     fi
 else
     print -u2 "ERROR: could not found any public keys in ${LOCAL_DIR}!"
-    exit 1  
+    exit 1
 fi
 # check for SSH control scripts & configurations (not .local)
 if (( ARG_ACTION == 1 || ARG_ACTION == 2 || ARG_ACTION == 4 ))
@@ -334,11 +343,16 @@ then
         if [[ ! -r "${FILE}" ]]
         then
             print -u2 "ERROR: cannot read file ${FILE}"
-            exit 1    
+            exit 1
         fi
-    done    
+    done
 fi
-
+# check if 'ssh-keyscan' exists
+if [[ ! -x "${SSH_KEYSCAN_BIN}" ]]
+then
+    print -u2 "WARN: 'ssh-keyscan' tool not found, host key discovery is not possible"
+    CAN_DISCOVER_KEYS=0
+fi
 
 return 0
 }
@@ -450,12 +464,13 @@ cat << EOT
 Performs basic functions for SSH controls: update SSH keys locally or
 remote, create SSH key fingerprints or copy/distribute the SSH controls files
 
-Syntax: ${SCRIPT_DIR}/${SCRIPT_NAME} [--help] | (--backup | --check-syntax | --preview-global | --make-finger | --update ) | 
+Syntax: ${SCRIPT_DIR}/${SCRIPT_NAME} [--help] | (--backup | --check-syntax | --preview-global | --make-finger | --update ) |
             (--apply [--remote-dir=<remote_directory>] [--targets=<host1>,<host2>,...]) |
                 ((--copy|--distribute) [--remote-dir=<remote_directory> [--targets=<host1>,<host2>,...]]) |
+                    (--discover [--targets=<host1>,<host2>,...]) |
                     ([--fix-local --fix-dir=<repository_dir> [--create-dir]] | [--fix-remote [--create-dir] [--targets=<host1>,<host2>,...]])
                          [--local-dir=<local_directory>] [--no-log] [--log-dir=<log_directory>] [--debug]
- 
+
 Parameters:
 
 --apply|-a          : apply SSH controls remotely (~targets)
@@ -463,10 +478,11 @@ Parameters:
 --create-dir        : also create missing directories when fixing the SSH controls
                       repository (see also --fix-local/--fix-remote)
 --check-syntax|-s   : do basic syntax checking on SSH controls configuration
-                      (access, alias & keys files) 
+                      (access, alias & keys files)
 --copy|-c           : copy SSH control files to remote host (~targets)
 --debug             : print extra status messages on STDERR
---distribute|-d     : same as --copy
+--discover|-d       : discover SSH host keys (STDOUT)
+--distribute        : same as --copy
 --fix-dir           : location of the local SSH controls client repository
 --fix-local         : fix permissions on the local SSH controls repository
                       (local SSH controls repository given by --fix-dir)
@@ -478,10 +494,10 @@ Parameters:
 --no-log            : do not log any messages to the script log file.
 --make-finger|-m    : create (local) key fingerprints file
 --preview-global|-p : dump the global access namespace (after alias resolution)
---remote-dir        : directory where SSH control files are/should be 
+--remote-dir        : directory where SSH control files are/should be
                       located/copied on/to the target host
                       [default: ${REMOTE_DIR}]
---targets           : comma-separated list of target hosts to operate on. Override the 
+--targets           : comma-separated list of target hosts to operate on. Override the
                       hosts contained in the 'targets' configuration file.
 --update|-u         : apply SSH controls locally
 
@@ -490,10 +506,10 @@ Parameters:
 Note 1: distribute and update actions are run in parallel across a maximum of
         ${MAX_BACKGROUND_PROCS} clients at the same time.
 
-Note 2: for fix and update actions: make sure correct 'sudo' rules are setup 
-        on the target systems to allow the SSH controls script to run with 
+Note 2: for fix and update actions: make sure correct 'sudo' rules are setup
+        on the target systems to allow the SSH controls script to run with
         elevated privileges.
-        
+
 Note 3: only GLOBAL configuration files will be distributed to target hosts.
 
 EOT
@@ -502,12 +518,11 @@ return 0
 }
 
 # -----------------------------------------------------------------------------
-# distribute SSH controls to a single host/client 
+# distribute SSH controls to a single host/client
 function distribute2host
 {
 SERVER="$1"
 ERROR_COUNT=0
-
 # convert line to hostname
 SERVER=${SERVER%%;*}
 resolve_host ${SERVER}
@@ -525,7 +540,7 @@ for FILE in "${LOCAL_DIR}/access!660" \
             "${LOCAL_DIR}/update_ssh.conf!660" \
             "${SCRIPT_DIR}/${SCRIPT_NAME}!770" \
             "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}!660"
-do              
+do
     # sftp transfer
     sftp_file ${FILE} ${SERVER}
     COPY_RC=$?
@@ -628,7 +643,6 @@ then
     warn "could not lookup host ${SERVER}, skipping"
     return 1
 fi
-        
 log "fixing ssh controls on ${SERVER} ..."
 if [[ -z "${SSH_UPDATE_USER}" ]]
 then
@@ -663,7 +677,7 @@ LSB_VERSION=$(lsb_release -rs 2>/dev/null | cut -f1 -d'.')
 if [[ -z "${LSB_VERSION}" ]]
 then
     RELEASE_STRING=$(/bin/grep -i 'release' /etc/redhat-release 2>/dev/null)
-    
+
     case "${RELEASE_STRING}" in
         *release\ 5*)
             RHEL_VERSION=5
@@ -852,7 +866,7 @@ return $?
 
 # -----------------------------------------------------------------------------
 # transfer a file using sftp
-function sftp_file 
+function sftp_file
 {
 TRANSFER_FILE="$1"
 TRANSFER_HOST="$2"
@@ -888,7 +902,7 @@ return ${SFTP_RC}
 }
 
 # -----------------------------------------------------------------------------
-# update SSH controls on a single host/client 
+# update SSH controls on a single host/client
 # !! requires appropriate 'sudo' rules on remote client for privilege elevation
 function update2host
 {
@@ -902,7 +916,6 @@ then
     warn "could not lookup host ${SERVER}, skipping"
     return 1
 fi
-        
 log "setting ssh controls on ${SERVER} ..."
 if [[ -z "${SSH_UPDATE_USER}" ]]
 then
@@ -971,7 +984,7 @@ case "${FINGERPRINT}" in
         KEY_OTHER_COUNT=$(( KEY_OTHER_COUNT + 1 ))
         ;;
 esac
-        
+
 return 0
 }
 
@@ -1078,36 +1091,82 @@ for PARAMETER in ${CMD_LINE}
 do
     case ${PARAMETER} in
         -a|-apply|--apply)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=1
             ;;
         -b|-backup|--backup)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=9
             ;;
         -c|-copy|--copy)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=2
             ;;
         -debug|--debug)
             ARG_DEBUG=1
             ;;
-        -d|-distribute|--distribute)
+        -distribute|--distribute)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=2
             ;;
+        -d|-discover|--discover)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
+            ARG_ACTION=10
+            ARG_LOG=0
+            ARG_VERBOSE=0
+            CAN_DISCOVER_KEYS=1
+            ;;
         -p|--preview-global|-preview-global)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=7
             ;;
         -s|--check-syntax|-check-syntax)
             ARG_ACTION=8
             ;;
         -fix-local|--fix-local)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=5
             ;;
         -fix-remote|--fix-remote)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=6
             ;;
         -m|-make-finger|--make-finger)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=3
             ;;
         -u|-update|--update)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
             ARG_ACTION=4
             ;;
         -create-dir|--create-dir)
@@ -1154,14 +1213,14 @@ do
             display_usage
             exit 0
             ;;
-    esac    
+    esac
 done
 
 # check for configuration files (local overrides local)
 if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" || -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
 then
     if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" ]]
-    then    
+    then
         . "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}"
     fi
     if [[ -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
@@ -1170,7 +1229,7 @@ then
     fi
 else
     print -u2 "ERROR: could not find global or local configuration file"
-fi  
+fi
 
 # startup checks
 check_params && check_config && check_setup && check_logging
@@ -1178,8 +1237,8 @@ check_params && check_config && check_setup && check_logging
 # catch shell signals
 trap 'do_cleanup; exit' 1 2 3 15
 
-log "*** start of ${SCRIPT_NAME} [${CMD_LINE}] ***"    
-(( ARG_LOG )) && log "logging takes places in ${LOG_FILE}"  
+log "*** start of ${SCRIPT_NAME} [${CMD_LINE}] ***"
+(( ARG_LOG )) && log "logging takes places in ${LOG_FILE}"
 
 log "runtime info: LOCAL_DIR is set to: ${LOCAL_DIR}"
 
@@ -1220,7 +1279,7 @@ case ${ARG_ACTION} in
         done
         # final wait for background processes to be finished completely
         wait_for_children ${PIDS} || \
-            warn "$? background jobs (possibly) failed to complete correctly"      
+            warn "$? background jobs (possibly) failed to complete correctly"
 
         log "finished applying SSH controls remotely"
         ;;
@@ -1275,7 +1334,7 @@ case ${ARG_ACTION} in
             do
                 update_fingerprints "${LINE}"
                 KEY_COUNT=$(( KEY_COUNT + 1 ))
-            done 
+            done
         else
             while read LINE
             do
@@ -1300,7 +1359,7 @@ case ${ARG_ACTION} in
         then
             die "failed to apply SSH controls locally [RC=${RC}]"
         else
-            log "finished applying SSH controls locally [RC=${RC}]"     
+            log "finished applying SSH controls locally [RC=${RC}]"
         fi
         ;;
     5)  # fix local directory structure/perms/ownerships
@@ -1310,12 +1369,12 @@ case ${ARG_ACTION} in
         then
             log "you requested to create directories (if needed)"
         else
-            log "you requested NOT to create directories (if needed)"       
+            log "you requested NOT to create directories (if needed)"
         fi
-        
+
         # check if the SSH control repo is already there
         if [[ ${FIX_CREATE} = 1 && ! -d "${FIX_DIR}" ]]
-        then    
+        then
             # create stub directories
             mkdir -p "${FIX_DIR}/holding" 2>/dev/null || \
                 warn "failed to create directory ${FIX_DIR}/holding"
@@ -1332,7 +1391,7 @@ case ${ARG_ACTION} in
             then
                 chmod 2775 "${FIX_DIR}/holding" 2>/dev/null && \
                     chown root:${SSH_OWNER_GROUP} "${FIX_DIR}/holding" 2>/dev/null
-            fi                  
+            fi
             if [[ -d "${FIX_DIR}/keys.d" ]]
             then
                 chmod 755 "${FIX_DIR}/keys.d" 2>/dev/null && \
@@ -1396,8 +1455,8 @@ case ${ARG_ACTION} in
     6)  # fix remote directory structure/perms/ownerships
         log "ACTION: fix remote SSH controls repository"
         check_root_user && die "must NOT be run as user 'root'"
-        # derive SSH controls repo from $REMOTE_DIR: 
-        # /etc/ssh_controls/holding -> /etc/ssh_controls 
+        # derive SSH controls repo from $REMOTE_DIR:
+        # /etc/ssh_controls/holding -> /etc/ssh_controls
         FIX_DIR="$(print ${REMOTE_DIR%/*})"
         [[ -z "${FIX_DIR}" ]] && \
             die "could not determine SSH controls repo path from \$REMOTE_DIR?"
@@ -1462,7 +1521,7 @@ case ${ARG_ACTION} in
             then
                 log "$(tar -cvf ${BACKUP_TAR_FILE} ${KEYS_DIR} 2>/dev/null)"
             else
-                log "$(tar -cvf ${BACKUP_TAR_FILE} ${KEYS_FILE} 2>/dev/null)"   
+                log "$(tar -cvf ${BACKUP_TAR_FILE} ${KEYS_FILE} 2>/dev/null)"
             fi
             # configuration files
             for FILE in "${LOCAL_DIR}/access" "${LOCAL_DIR}/alias ${LOCAL_DIR}/targets"
@@ -1475,6 +1534,15 @@ case ${ARG_ACTION} in
             die "could not find backup directory ${BACKUP_DIR}. Host is not an SSH master?"
         fi
         log "finished backing up the current configuration & keys files"
+        ;;
+    10) # gather SSH host keys
+        log "ACTION: gathering SSH host keys ..."
+        if (( CAN_DISCOVER_KEYS ))
+        then
+            cat "${TARGETS_FILE}" | grep -v -E -e '^#' -e '^$' |\
+                ${SSH_KEYSCAN_BIN} ${SSH_KEYSCAN_ARGS} -f -
+        fi
+        log "finished gathering SSH host keys"
         ;;
 esac
 
