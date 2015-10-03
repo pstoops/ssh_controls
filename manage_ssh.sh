@@ -2,7 +2,7 @@
 #******************************************************************************
 # @(#) manage_ssh.sh
 #******************************************************************************
-# @(#) Copyright (C) 2014 by KUDOS BVBA <info@kudos.be>.  All rights reserved.
+# @(#) Copyright (C) 2014 by KUDOS BVBA (info@kudos.be).  All rights reserved.
 #
 # This program is a free software; you can redistribute it and/or modify
 # it under the same terms of the GNU General Public License as published by
@@ -18,13 +18,16 @@
 # -----------------------------------------------------------------------------
 # @(#) MAIN: manage_ssh.sh
 # DOES: performs basic functions for SSH controls: update SSH keys locally or
-#       remote, create SSH key fingerprints or distribute the SSH controls files
+#       remote, create SSH key fingerprints, distribute the SSH controls files,
+#       discover SSH host keys.
 # EXPECTS: (see --help for more options)
 # REQUIRES: check_config(), check_logging(), check_params(), check_root_user(),
 #           check_setup(), check_syntax(), count_fields(), die(), display_usage(),
-#           distribute2host(), do_cleanup(), fix2host(), get_linux_version(),
-#           log(), logc(), resolve_host(), sftp_file(), update2host(),
-#           update_fingerprints(), wait_for_children(), warn()
+#           distribute2host(), distribute2slave(), do_cleanup(), fix2host(), 
+#           fix2slave(), get_linux_name(), get_linux_version(), log(), logc(), 
+#           resolve_host(), sftp_file(),  start_ssh_agent(), stop_ssh_agent(),
+#           update2host(), update2slave(), update_fingerprints(), 
+#           wait_for_children(), warn()
 #           For other pre-requisites see the documentation in display_usage()
 #
 # @(#) HISTORY:
@@ -53,6 +56,9 @@
 # @(#)             (VRF 1.3.3) [Patrick Van der Veken]
 # @(#) 2015-09-27: added SSH host keys discovery, re-assigned '-d' command-line
 # @(#)             option to this function (VRF 1.4.0) [Patrick Van der Veken]
+# @(#) 2015-10-03: added --slave option, 3 new configuration parameters & supporting
+# @(#)             functions for master->slave operations, several bug fixes
+# @(#)             (VRF 1.5.0) [Patrick Van der Veken]
 # -----------------------------------------------------------------------------
 # DO NOT CHANGE THIS FILE UNLESS YOU KNOW WHAT YOU ARE DOING!
 #******************************************************************************
@@ -66,7 +72,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the V.R.F (version/release/fix)
-MY_VRF="1.4.0"
+MY_VRF="1.5.0"
 # name of the global configuration file (script)
 GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -79,11 +85,13 @@ PATH=${PATH}:/usr/bin:/usr/local/bin
 SCRIPT_NAME=$(basename $0)
 SCRIPT_DIR=$(dirname $0)
 OS_NAME="$(uname)"
+HOST_NAME="$(hostname)"
 KEYS_FILE=""
 KEYS_DIR=""
 TARGETS_FILE=""
 FIX_CREATE=0
 CAN_DISCOVER_KEYS=0
+CAN_START_AGENT=1
 KEY_COUNT=0
 KEY_1024_COUNT=0
 KEY_2048_COUNT=0
@@ -152,6 +160,18 @@ fi
 if [[ -z "${SSH_KEYSCAN_BIN}" ]]
 then
     print -u2 "ERROR: no value for the SSH_KEYSCAN_BIN setting in the configuration file"
+    exit 1
+fi
+# DO_SSH_AGENT
+if [[ -z "${DO_SSH_AGENT}" ]]
+then
+    print -u2 "ERROR:no value for the DO_SSH_AGENT setting in the configuration file"
+    exit 1
+fi
+# DO_SSH_SLAVE_AGENT
+if [[ -z "${DO_SSH_SLAVE_AGENT}" ]]
+then
+    print -u2 "ERROR:no value for the DO_SSH_SLAVE_AGENT setting in the configuration file"
     exit 1
 fi
 # MAX_BACKGROUND_PROCS
@@ -240,6 +260,15 @@ then
         REMOTE_DIR="${ARG_REMOTE_DIR}"
     fi
 fi
+# --slave
+if (( DO_SLAVE ))
+then
+    # requires a list of targets (=slave servers)
+    [[ -n "${ARG_TARGETS}" ]] || {
+        print -u2 "ERROR: you must specify a list of targets with the --slave option"
+        exit 1
+    }
+fi
 # --targets
 if [[ -n "${ARG_TARGETS}" ]]
 then
@@ -296,13 +325,12 @@ then
     if [[ -z "${ARG_TARGETS}" ]]
     then
         TARGETS_FILE="${LOCAL_DIR}/targets"
-        if [ \( ! -r "${TARGETS_FILE}" \) -a \( ! -r "/var/tmp/targets.${USER}" \) ]
+        if [[ ! -r "${TARGETS_FILE}" ]]
         then
-            print -u2 "ERROR: cannot read file ${TARGETS_FILE} nor /var/tmp/targets.${USER}"
+            print -u2 "ERROR: cannot read file ${TARGETS_FILE}"
+            print -u2 "ERROR: possibly this is not a master or slave server"
             exit 1
         fi
-        # override default targets file
-        [[ -r "/var/tmp/targets.${USER}" ]] && TARGETS_FILE="/var/tmp/targets.${USER}"
     else
         TARGETS_FILE=${TMP_FILE}
     fi
@@ -352,6 +380,23 @@ if [[ ! -x "${SSH_KEYSCAN_BIN}" ]]
 then
     print -u2 "WARN: 'ssh-keyscan' tool not found, host key discovery is not possible"
     CAN_DISCOVER_KEYS=0
+fi
+# check for SSH agent pre-requisites
+if (( DO_SSH_AGENT || DO_SSH_SLAVE_AGENT ))
+then
+    # ssh-agent
+    which ssh-agent 2>/dev/null
+    if (( $? ))
+    then
+        print -u2 "WARN: ssh-agent not available on ${HOST_NAME}"
+        CAN_START_AGENT=0
+    fi
+    # private key
+    if [[ ! -r "${SSH_PRIVATE_KEY}" ]]
+    then
+        print -u2 "WARN: SSH private key not found ${SSH_PRIVATE_KEY}, ssh-agent disabled"
+        CAN_START_AGENT=0
+    fi
 fi
 
 return 0
@@ -465,21 +510,21 @@ Performs basic functions for SSH controls: update SSH keys locally or
 remote, create SSH key fingerprints or copy/distribute the SSH controls files
 
 Syntax: ${SCRIPT_DIR}/${SCRIPT_NAME} [--help] | (--backup | --check-syntax | --preview-global | --make-finger | --update ) |
-            (--apply [--remote-dir=<remote_directory>] [--targets=<host1>,<host2>,...]) |
-                ((--copy|--distribute) [--remote-dir=<remote_directory> [--targets=<host1>,<host2>,...]]) |
+            (--apply [--slave] [--remote-dir=<remote_directory>] [--targets=<host1>,<host2>,...]) |
+                ((--copy|--distribute) [--slave] [--remote-dir=<remote_directory> [--targets=<host1>,<host2>,...]]) |
                     (--discover [--targets=<host1>,<host2>,...]) |
-                    ([--fix-local --fix-dir=<repository_dir> [--create-dir]] | [--fix-remote [--create-dir] [--targets=<host1>,<host2>,...]])
-                         [--local-dir=<local_directory>] [--no-log] [--log-dir=<log_directory>] [--debug]
+                        ([--fix-local --fix-dir=<repository_dir> [--create-dir]] | [--fix-remote [--slave] [--create-dir] [--targets=<host1>,<host2>,...]])
+                            [--local-dir=<local_directory>] [--no-log] [--log-dir=<log_directory>] [--debug]
 
 Parameters:
 
 --apply|-a          : apply SSH controls remotely (~targets)
 --backup|-b         : create a backup of the SSH controls repository (SSH master)
---create-dir        : also create missing directories when fixing the SSH controls
-                      repository (see also --fix-local/--fix-remote)
 --check-syntax|-s   : do basic syntax checking on SSH controls configuration
                       (access, alias & keys files)
 --copy|-c           : copy SSH control files to remote host (~targets)
+--create-dir        : also create missing directories when fixing the SSH controls
+                      repository (see also --fix-local/--fix-remote)
 --debug             : print extra status messages on STDERR
 --discover|-d       : discover SSH host keys (STDOUT)
 --distribute        : same as --copy
@@ -489,24 +534,25 @@ Parameters:
 --fix-remote        : fix permissions on the remote SSH controls repository
 --help|-h           : this help text
 --local-dir         : location of the SSH control files on the local filesystem.
-                      [default: ${LOCAL_DIR}]
+                      [default: see LOCAL_DIR setting]
 --log-dir           : specify a log directory location.
 --no-log            : do not log any messages to the script log file.
 --make-finger|-m    : create (local) key fingerprints file
 --preview-global|-p : dump the global access namespace (after alias resolution)
 --remote-dir        : directory where SSH control files are/should be
                       located/copied on/to the target host
-                      [default: ${REMOTE_DIR}]
+                      [default: see REMOTE_DIR setting]
+--slave             : perform actions in master->slave mode
 --targets           : comma-separated list of target hosts to operate on. Override the
                       hosts contained in the 'targets' configuration file.
 --update|-u         : apply SSH controls locally
 
 --version|-V        : show the script version/release/fix
 
-Note 1: distribute and update actions are run in parallel across a maximum of
-        ${MAX_BACKGROUND_PROCS} clients at the same time.
+Note 1: copy and apply actions are run in parallel across a maximum of clients
+        at the same time [default: see MAX_BACKGROUND_PROCS setting]
 
-Note 2: for fix and update actions: make sure correct 'sudo' rules are setup
+Note 2: for fix and apply actions: make sure correct 'sudo' rules are setup
         on the target systems to allow the SSH controls script to run with
         elevated privileges.
 
@@ -585,7 +631,7 @@ else
         log "transferred ${KEYS_FILE} to ${SERVER}:${REMOTE_DIR}"
     else
         warn "failed to transfer ${KEYS_FILE} to ${SERVER}:${REMOTE_DIR} [RC=${COPY_RC}]"
-        ERROR_COUNT = $(( ERROR_COUNT + 1 ))
+        ERROR_COUNT=$(( ERROR_COUNT + 1 ))
     fi
 fi
 # discover a keys blacklist file, also copy it across if we find one
@@ -605,12 +651,39 @@ then
             log "transferred ${BLACKLIST_FILE} to ${SERVER}:${REMOTE_DIR}"
         else
             warn "failed to transfer ${BLACKLIST_FILE%!*} to ${SERVER}:${REMOTE_DIR} [RC=${COPY_RC}]"
-            ERROR_COUNT = $(( ERROR_COUNT + 1 ))
+            ERROR_COUNT=$(( ERROR_COUNT + 1 ))
         fi
     fi
 fi
 
 return ${ERROR_COUNT}
+}
+
+
+# -----------------------------------------------------------------------------
+# distribute SSH controls to a single host in slave mode
+function distribute2slave
+{
+SERVER="$1"
+
+# convert line to hostname
+SERVER=${SERVER%%;*}
+resolve_host ${SERVER}
+if (( $? ))
+then
+    warn "could not lookup host ${SERVER}, skipping"
+    return 1
+fi
+
+log "copying SSH controls on ${SERVER} in slave mode, this may take a while ..."
+( RC=0; ssh -A ${SSH_ARGS} ${SERVER} ${REMOTE_DIR}/${SCRIPT_NAME} --copy;
+      print "$?" > ${TMP_RC_FILE}; exit
+) 2>&1 | logc
+
+# fetch return code from subshell
+RC="$(< ${TMP_RC_FILE})"
+
+return ${RC}
 }
 
 # -----------------------------------------------------------------------------
@@ -622,7 +695,7 @@ log "performing cleanup ..."
 [[ -f ${TMP_FILE} ]] && rm -f ${TMP_FILE} >/dev/null 2>&1
 [[ -f ${TMP_MERGE_FILE} ]] && rm -f ${TMP_MERGE_FILE} >/dev/null 2>&1
 [[ -f ${TMP_RC_FILE} ]] && rm -f ${TMP_RC_FILE} >/dev/null 2>&1
-log "*** finish of ${SCRIPT_NAME} [${CMD_LINE}] ***"
+log "*** finish of ${SCRIPT_NAME} [${CMD_LINE}] /$$@${HOST_NAME}/ ***"
 
 return 0
 }
@@ -643,7 +716,7 @@ then
     warn "could not lookup host ${SERVER}, skipping"
     return 1
 fi
-log "fixing ssh controls on ${SERVER} ..."
+log "fixing SSH controls on ${SERVER} ..."
 if [[ -z "${SSH_UPDATE_USER}" ]]
 then
     # own user w/ sudo
@@ -670,13 +743,51 @@ return ${RC}
 }
 
 # -----------------------------------------------------------------------------
+# fix SSH controls on a single host/client in slave mode (permissions/ownerships)
+# !! requires appropriate 'sudo' rules on remote client for privilege elevation
+function fix2slave
+{
+SERVER="$1"
+SERVER_DIR="$2"
+
+# convert line to hostname
+SERVER=${SERVER%%;*}
+resolve_host ${SERVER}
+if (( $? ))
+then
+    warn "could not lookup host ${SERVER}, skipping"
+    return 1
+fi
+
+log "fixing SSH controls on ${SERVER} in slave mode, this may take a while ..."
+( RC=0; ssh -A ${SSH_ARGS} ${SERVER} ${REMOTE_DIR}/${SCRIPT_NAME} --fix-remote --fix-dir=${SERVER_DIR};
+    print "$?" > ${TMP_RC_FILE}; exit
+) 2>&1 | logc
+
+# fetch return code from subshell
+RC="$(< ${TMP_RC_FILE})"
+
+return ${RC}
+}
+
+# -----------------------------------------------------------------------------
+function get_linux_name
+{
+LSB_NAME="$(lsb_release -is 2>/dev/null | cut -f2 -d':')"
+
+print "${LSB_NAME}"
+
+return 0
+}
+
+# -----------------------------------------------------------------------------
 function get_linux_version
 {
-LSB_VERSION=$(lsb_release -rs 2>/dev/null | cut -f1 -d'.')
+LSB_VERSION="$(lsb_release -rs 2>/dev/null | cut -f1 -d'.')"
 
 if [[ -z "${LSB_VERSION}" ]]
 then
-    RELEASE_STRING=$(/bin/grep -i 'release' /etc/redhat-release 2>/dev/null)
+    RELEASE_STRING="$(grep -i 'release' /etc/redhat-release 2>/dev/null)"
 
     case "${RELEASE_STRING}" in
         *release\ 5*)
@@ -696,8 +807,9 @@ then
 else
     print "${LSB_VERSION}"
 fi
-}
 
+return 0
+}
 
 # -----------------------------------------------------------------------------
 # log an INFO: message (via ARG).
@@ -902,6 +1014,78 @@ return ${SFTP_RC}
 }
 
 # -----------------------------------------------------------------------------
+# start a SSH agent
+function start_ssh_agent
+{
+log "requested to start an SSH agent on ${HOST_NAME} ..."
+
+# is there one still running, then we re-use it
+if [[ -n "${SSH_AGENT_PID}" ]]
+then
+    log "SSH agent already running on ${HOST_NAME} with PID: ${SSH_AGENT_PID}"
+else
+    # start the SSH agent
+    eval $(ssh-agent) >/dev/null 2>/dev/null
+
+    if [[ -z "${SSH_AGENT_PID}" ]]
+    then
+        warn "unable to start SSH agent on ${HOST_NAME}"
+        return 1
+    else
+        log "SSH agent started on ${HOST_NAME}:"
+        log "$(ps -fp ${SSH_AGENT_PID})"
+    fi
+fi
+
+# add the private key
+log "adding private key ${SSH_PRIVATE_KEY} to SSH agent on ${HOST_NAME} ..."
+log "$(ssh-add ${SSH_PRIVATE_KEY} 2>&1)"
+if (( $? ))
+then
+    warn "unable to add SSH private key to SSH agent on ${HOST_NAME}"
+    return 1
+fi
+
+return 0
+}
+
+# -----------------------------------------------------------------------------
+function stop_ssh_agent
+{
+# stop the SSH agent
+log "stopping SSH agent (if needed) on ${HOST_NAME} ..."
+
+if [[ -n "${SSH_AGENT_PID}" ]]
+then
+    # SIGTERM
+    log "stopping (TERM) process on ${HOST_NAME} with PID: ${SSH_AGENT_PID}"
+    log "$(ps -fp ${SSH_AGENT_PID})"
+    kill -s TERM ${SSH_AGENT_PID}
+    sleep 3
+
+    # SIGKILL
+    if (( $(pgrep -u "${USER}" ssh-agent | grep -c "${SSH_AGENT_PID}") ))
+    then
+        log "stopping (KILL) process on ${HOST_NAME} with PID: ${SSH_AGENT_PID}"
+        log "$(ps -fp ${SSH_AGENT_PID})"
+        kill -s kill ${SSH_AGENT_PID}
+    fi
+    sleep 3
+else
+    log "no SSH agent running on ${HOST_NAME}"
+fi
+
+# process check
+if (( $(pgrep -u "${USER}" ssh-agent | grep -c "${SSH_AGENT_PID}") ))
+then
+    warn "unable to stop running SSH agent on ${HOST_NAME} [PID=${SSH_AGENT_PID}]"
+    return 1
+fi
+
+return 0
+}
+
+# -----------------------------------------------------------------------------
 # update SSH controls on a single host/client
 # !! requires appropriate 'sudo' rules on remote client for privilege elevation
 function update2host
@@ -935,6 +1119,32 @@ else
       print "$?" > ${TMP_RC_FILE}; exit
     ) 2>&1 | logc
 fi
+
+# fetch return code from subshell
+RC="$(< ${TMP_RC_FILE})"
+
+return ${RC}
+}
+
+# -----------------------------------------------------------------------------
+# update SSH controls on a single host/client in slave mode
+function update2slave
+{
+SERVER="$1"
+
+# convert line to hostname
+SERVER=${SERVER%%;*}
+resolve_host ${SERVER}
+if (( $? ))
+then
+    warn "could not lookup host ${SERVER}, skipping"
+    return 1
+fi
+
+log "applying ssh controls on ${SERVER} in slave mode, this may take a while ..."
+( RC=0; ssh -A ${SSH_ARGS} ${SERVER} ${REMOTE_DIR}/${SCRIPT_NAME} --apply;
+      print "$?" > ${TMP_RC_FILE}; exit
+) 2>&1 | logc
 
 # fetch return code from subshell
 RC="$(< ${TMP_RC_FILE})"
@@ -1138,9 +1348,6 @@ do
             }
             ARG_ACTION=7
             ;;
-        -s|--check-syntax|-check-syntax)
-            ARG_ACTION=8
-            ;;
         -fix-local|--fix-local)
             (( ARG_ACTION )) && {
                 print -u2 "ERROR: multiple actions specified"
@@ -1155,12 +1362,12 @@ do
             }
             ARG_ACTION=6
             ;;
-        -m|-make-finger|--make-finger)
+        -s|-check-syntax|--check-syntax)
             (( ARG_ACTION )) && {
                 print -u2 "ERROR: multiple actions specified"
                 exit 1
             }
-            ARG_ACTION=3
+            ARG_ACTION=8
             ;;
         -u|-update|--update)
             (( ARG_ACTION )) && {
@@ -1198,6 +1405,9 @@ do
             ;;
         --remote-dir=*)
             ARG_REMOTE_DIR="${PARAMETER#--remote-dir=}"
+            ;;
+        -slave|--slave)
+            DO_SLAVE=1
             ;;
         -targets=*)
             ARG_TARGETS="${PARAMETER#-targets=}"
@@ -1237,15 +1447,32 @@ check_params && check_config && check_setup && check_logging
 # catch shell signals
 trap 'do_cleanup; exit' 1 2 3 15
 
-log "*** start of ${SCRIPT_NAME} [${CMD_LINE}] ***"
+log "*** start of ${SCRIPT_NAME} [${CMD_LINE}] /$$@${HOST_NAME}/ ***"
 (( ARG_LOG )) && log "logging takes places in ${LOG_FILE}"
 
 log "runtime info: LOCAL_DIR is set to: ${LOCAL_DIR}"
 
 case ${ARG_ACTION} in
-    1)  # apply SSH controls remotely
+    1)  # apply SUDO controls remotely
         log "ACTION: apply SSH controls remotely"
         check_root_user && die "must NOT be run as user 'root'"
+        # start SSH agent (if needed)
+        if (( DO_SSH_AGENT && CAN_START_AGENT ))
+        then
+            start_ssh_agent
+            if (( $? ))
+            then
+                die "problem with launching an SSH agent, bailing out"
+            fi
+        fi
+        if (( DO_SLAVE && DO_SSH_SLAVE_AGENT && CAN_START_AGENT ))
+        then
+            start_ssh_agent
+            if (( $? ))
+            then
+                die "problem with launching an SSH agent, bailing out"
+            fi
+        fi
         # build clients list (in array)
         cat "${TARGETS_FILE}" | grep -v -E -e '^#' -e '^$' |\
         {
@@ -1261,7 +1488,12 @@ case ${ARG_ACTION} in
         COUNT=${MAX_BACKGROUND_PROCS}
         for CLIENT in ${CLIENTS[@]}
         do
-            update2host ${CLIENT} &
+            if (( DO_SLAVE ))
+            then
+                update2slave ${CLIENT} &
+            else
+                update2host ${CLIENT} &
+            fi
             PID=$!
             log "updating ${CLIENT} in background [PID=${PID}] ..."
             # add PID to list of all child PIDs
@@ -1280,12 +1512,31 @@ case ${ARG_ACTION} in
         # final wait for background processes to be finished completely
         wait_for_children ${PIDS} || \
             warn "$? background jobs (possibly) failed to complete correctly"
-
+        # stop SSH agent if needed
+        (( ( DO_SSH_AGENT || ( DO_SLAVE && DO_SSH_SLAVE_AGENT )) && CAN_START_AGENT )) && \
+            stop_ssh_agent
         log "finished applying SSH controls remotely"
         ;;
     2)  # copy/distribute SSH controls
         log "ACTION: copy/distribute SSH controls"
         check_root_user && die "must NOT be run as user 'root'"
+        # start SSH agent (if needed)
+        if (( DO_SSH_AGENT && CAN_START_AGENT ))
+        then
+            start_ssh_agent
+            if (( $? ))
+            then
+                die "problem with launching an SSH agent, bailing out"
+            fi
+        fi
+        if (( DO_SLAVE && DO_SSH_SLAVE_AGENT && CAN_START_AGENT ))
+        then
+            start_ssh_agent
+            if (( $? ))
+            then
+                die "problem with launching an SSH agent, bailing out"
+            fi
+        fi
         # build clients list (in array)
         cat "${TARGETS_FILE}" | grep -v -E -e '^#' -e '^$' |\
         {
@@ -1301,7 +1552,12 @@ case ${ARG_ACTION} in
         COUNT=${MAX_BACKGROUND_PROCS}
         for CLIENT in ${CLIENTS[@]}
         do
-            distribute2host ${CLIENT} &
+            if (( DO_SLAVE ))
+            then
+                distribute2slave ${CLIENT} &
+            else
+                distribute2host ${CLIENT} &
+            fi
             PID=$!
             log "copying/distributing to ${CLIENT} in background [PID=${PID}] ..."
             # add PID to list of all child PIDs
@@ -1320,6 +1576,9 @@ case ${ARG_ACTION} in
         # final wait for background processes to be finished completely
         wait_for_children ${PIDS} || \
             warn "$? background jobs (possibly) failed to complete correctly"
+        # stop SSH agent if needed
+        (( ( DO_SSH_AGENT || ( DO_SLAVE && DO_SSH_SLAVE_AGENT )) && CAN_START_AGENT )) && \
+            stop_ssh_agent
         log "finished copying/distributing SSH controls"
         ;;
     3)  # create key fingerprints
@@ -1423,23 +1682,28 @@ case ${ARG_ACTION} in
             # check for SELinux labels
             case ${OS_NAME} in
                 *Linux*)
-                    case "$(getenforce)" in
-                        *Permissive*|*Enforcing*)
-                            LINUX_VERSION=$(get_linux_version)
-                            case "${LINUX_VERSION}" in
-                                5)
-                                    chcon -R -t sshd_key_t "${FIX_DIR}/keys.d"
+                    LINUX_NAME="$(get_linux_name)"
+                    LINUX_VERSION="$(get_linux_version)"
+                    case ${LINUX_NAME} in
+                        *Centos*|*RHEL*)
+                            case "$(getenforce 2>/dev/null)" in
+                                *Permissive*|*Enforcing*)
+                                    case "${LINUX_VERSION}" in
+                                        5)
+                                            chcon -R -t sshd_key_t "${FIX_DIR}/keys.d"
+                                            ;;
+                                        6|7)
+                                            chcon -R -t ssh_home_t "${FIX_DIR}/keys.d"
+                                            ;;
+                                        *)
+                                            chcon -R -t etc_t "${FIX_DIR}/keys.d"
+                                           ;;
+                                    esac
                                     ;;
-                                6|7)
-                                    chcon -R -t ssh_home_t "${FIX_DIR}/keys.d"
-                                    ;;
-                                *)
-                                    chcon -R -t etc_t "${FIX_DIR}/keys.d"
+                                *Disabled*)
+                                    :
                                     ;;
                             esac
-                            ;;
-                        *Disabled*)
-                            :
                             ;;
                     esac
                     ;;
@@ -1455,6 +1719,23 @@ case ${ARG_ACTION} in
     6)  # fix remote directory structure/perms/ownerships
         log "ACTION: fix remote SSH controls repository"
         check_root_user && die "must NOT be run as user 'root'"
+        # start SSH agent (if needed)
+        if (( DO_SSH_AGENT && CAN_START_AGENT ))
+        then
+            start_ssh_agent
+            if (( $? ))
+            then
+                die "problem with launching an SSH agent, bailing out"
+            fi
+        fi
+        if (( DO_SLAVE && DO_SSH_SLAVE_AGENT && CAN_START_AGENT ))
+        then
+            start_ssh_agent
+            if (( $? ))
+            then
+                die "problem with launching an SSH agent, bailing out"
+            fi
+        fi
         # derive SSH controls repo from $REMOTE_DIR:
         # /etc/ssh_controls/holding -> /etc/ssh_controls
         FIX_DIR="$(print ${REMOTE_DIR%/*})"
@@ -1475,9 +1756,14 @@ case ${ARG_ACTION} in
         COUNT=${MAX_BACKGROUND_PROCS}
         for CLIENT in ${CLIENTS[@]}
         do
-            fix2host ${CLIENT} "${FIX_DIR}" &
+            if (( DO_SLAVE ))
+            then
+        fix2slave ${CLIENT} "${FIX_DIR}" &
+            else
+                fix2host ${CLIENT} "${FIX_DIR}" &
+            fi
             PID=$!
-            log "copying/distributing to ${CLIENT} in background [PID=${PID}] ..."
+            log "fixing SSH controls on ${CLIENT} in background [PID=${PID}] ..."
             # add PID to list of all child PIDs
             PIDS="${PIDS} ${PID}"
             COUNT=$(( COUNT - 1 ))
@@ -1494,6 +1780,9 @@ case ${ARG_ACTION} in
         # final wait for background processes to be finished completely
         wait_for_children ${PIDS} || \
             warn "$? background jobs (possibly) failed to complete correctly"
+        # stop SSH agent if needed
+        (( ( DO_SSH_AGENT || ( DO_SLAVE && DO_SSH_SLAVE_AGENT )) && CAN_START_AGENT )) && \
+            stop_ssh_agent
         log "finished applying fixes to the remote SSH control repository"
         ;;
     7)  # dump the configuration namespace
