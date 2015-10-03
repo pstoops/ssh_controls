@@ -1,7 +1,7 @@
 # SSH Controls
 SSH Controls is a light-weight SSH **public key** distribution & management framework
 
-* uses a **desired state** model: SSH Controls pushes public keys from a key master server onto client host and applies them according to the central configuration.
+* uses a **desired state** model: SSH Controls pushes public keys from a key master (or slave) server onto client host(s) and applies them according to the central configuration.
 
 * uses **SSH** as **transport** mechanism: eat your own dogfood. SSH Controls connects to client hosts through the secure path of SSH and using a public key that is under its own control.
 
@@ -27,7 +27,5 @@ SSH Controls is a light-weight SSH **public key** distribution & management fram
 SSH Controls does NOT:
 
 * manage or distribute SSH **private keys**: SSH private keys should be controlled and managed (and safeguarded!) by the actual owners. Though one could consider SSH key pairs of generic accounts (such as application accounts) as an exception, SSH Controls currently does not support the management of private keys.
-
-* discover SSH **host keys**: SSH Controls will silently ignore any questions related to host keys discoveries upon the first connection to client hosts. If you are managing a large number of client hosts, you may want to prepare a known_hosts file in advance or else let the host keys be added automatically upon first public key distribution.
 
 More documentation can be found at http://www.kudos.be/Projects/SSH_Controls.html
