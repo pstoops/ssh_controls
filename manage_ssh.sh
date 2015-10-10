@@ -59,6 +59,8 @@
 # @(#) 2015-10-03: added --slave option, 3 new configuration parameters & supporting
 # @(#)             functions for master->slave operations, several bug fixes
 # @(#)             (VRF 1.5.0) [Patrick Van der Veken]
+# @(#) 2015-10-09: simplified handling of SSH agent handling, obsoleted
+# @(#)             DO_SLAVE_SSH_AGENT option (VRF 1.5.1) [Patrick Van der Veken]
 # -----------------------------------------------------------------------------
 # DO NOT CHANGE THIS FILE UNLESS YOU KNOW WHAT YOU ARE DOING!
 #******************************************************************************
@@ -72,7 +74,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the V.R.F (version/release/fix)
-MY_VRF="1.5.0"
+MY_VRF="1.5.1"
 # name of the global configuration file (script)
 GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -166,12 +168,6 @@ fi
 if [[ -z "${DO_SSH_AGENT}" ]]
 then
     print -u2 "ERROR:no value for the DO_SSH_AGENT setting in the configuration file"
-    exit 1
-fi
-# DO_SSH_SLAVE_AGENT
-if [[ -z "${DO_SSH_SLAVE_AGENT}" ]]
-then
-    print -u2 "ERROR:no value for the DO_SSH_SLAVE_AGENT setting in the configuration file"
     exit 1
 fi
 # MAX_BACKGROUND_PROCS
@@ -382,10 +378,10 @@ then
     CAN_DISCOVER_KEYS=0
 fi
 # check for SSH agent pre-requisites
-if (( DO_SSH_AGENT || DO_SSH_SLAVE_AGENT ))
+if (( DO_SSH_AGENT ))
 then
     # ssh-agent
-    which ssh-agent 2>/dev/null
+    which ssh-agent >/dev/null 2>/dev/null
     if (( $? ))
     then
         print -u2 "WARN: ssh-agent not available on ${HOST_NAME}"
@@ -1465,14 +1461,6 @@ case ${ARG_ACTION} in
                 die "problem with launching an SSH agent, bailing out"
             fi
         fi
-        if (( DO_SLAVE && DO_SSH_SLAVE_AGENT && CAN_START_AGENT ))
-        then
-            start_ssh_agent
-            if (( $? ))
-            then
-                die "problem with launching an SSH agent, bailing out"
-            fi
-        fi
         # build clients list (in array)
         cat "${TARGETS_FILE}" | grep -v -E -e '^#' -e '^$' |\
         {
@@ -1513,7 +1501,7 @@ case ${ARG_ACTION} in
         wait_for_children ${PIDS} || \
             warn "$? background jobs (possibly) failed to complete correctly"
         # stop SSH agent if needed
-        (( ( DO_SSH_AGENT || ( DO_SLAVE && DO_SSH_SLAVE_AGENT )) && CAN_START_AGENT )) && \
+        (( DO_SSH_AGENT && CAN_START_AGENT )) && \
             stop_ssh_agent
         log "finished applying SSH controls remotely"
         ;;
@@ -1522,14 +1510,6 @@ case ${ARG_ACTION} in
         check_root_user && die "must NOT be run as user 'root'"
         # start SSH agent (if needed)
         if (( DO_SSH_AGENT && CAN_START_AGENT ))
-        then
-            start_ssh_agent
-            if (( $? ))
-            then
-                die "problem with launching an SSH agent, bailing out"
-            fi
-        fi
-        if (( DO_SLAVE && DO_SSH_SLAVE_AGENT && CAN_START_AGENT ))
         then
             start_ssh_agent
             if (( $? ))
@@ -1577,7 +1557,7 @@ case ${ARG_ACTION} in
         wait_for_children ${PIDS} || \
             warn "$? background jobs (possibly) failed to complete correctly"
         # stop SSH agent if needed
-        (( ( DO_SSH_AGENT || ( DO_SLAVE && DO_SSH_SLAVE_AGENT )) && CAN_START_AGENT )) && \
+        (( DO_SSH_AGENT && CAN_START_AGENT )) && \
             stop_ssh_agent
         log "finished copying/distributing SSH controls"
         ;;
@@ -1728,14 +1708,6 @@ case ${ARG_ACTION} in
                 die "problem with launching an SSH agent, bailing out"
             fi
         fi
-        if (( DO_SLAVE && DO_SSH_SLAVE_AGENT && CAN_START_AGENT ))
-        then
-            start_ssh_agent
-            if (( $? ))
-            then
-                die "problem with launching an SSH agent, bailing out"
-            fi
-        fi
         # derive SSH controls repo from $REMOTE_DIR:
         # /etc/ssh_controls/holding -> /etc/ssh_controls
         FIX_DIR="$(print ${REMOTE_DIR%/*})"
@@ -1758,7 +1730,7 @@ case ${ARG_ACTION} in
         do
             if (( DO_SLAVE ))
             then
-        fix2slave ${CLIENT} "${FIX_DIR}" &
+                fix2slave ${CLIENT} "${FIX_DIR}" &
             else
                 fix2host ${CLIENT} "${FIX_DIR}" &
             fi
@@ -1781,7 +1753,7 @@ case ${ARG_ACTION} in
         wait_for_children ${PIDS} || \
             warn "$? background jobs (possibly) failed to complete correctly"
         # stop SSH agent if needed
-        (( ( DO_SSH_AGENT || ( DO_SLAVE && DO_SSH_SLAVE_AGENT )) && CAN_START_AGENT )) && \
+        (( DO_SSH_AGENT && CAN_START_AGENT )) && \
             stop_ssh_agent
         log "finished applying fixes to the remote SSH control repository"
         ;;
