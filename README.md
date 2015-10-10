@@ -5,6 +5,8 @@ SSH Controls is a light-weight SSH **public key** distribution & management fram
 
 * uses **SSH** as **transport** mechanism: eat your own dogfood. SSH Controls connects to client hosts through the secure path of SSH and using a public key that is under its own control.
 
+* supports a **Master→Slave→Client** model so that information can be propagated within more complex LAN set-ups.
+
 * **shields** public keys from owners/users on client systems: SSH Controls requires the standard sshd_config to be reconfigured with an alternate path for the AuthorizedKeysFile setting so that public keys are stored in common location which cannot be manipulated by the owners of the public keys. This allows for more administrative control and better security. 
 
 * performs operations with **least privileges**: copy/distribute operations are performed with a low-privileged account. Only the actual key updates requires super-user privileges which need to be configured via SUDO.
