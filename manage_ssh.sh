@@ -1452,7 +1452,7 @@ log "*** start of ${SCRIPT_NAME} [${CMD_LINE}] /$$@${HOST_NAME}/ ***"
 log "runtime info: LOCAL_DIR is set to: ${LOCAL_DIR}"
 
 case ${ARG_ACTION} in
-    1)  # apply SUDO controls remotely
+    1)  # apply SSH controls remotely
         log "ACTION: apply SSH controls remotely"
         # check for root or non-root model
         if [[ "${SSH_UPDATE_USER}" != "root" ]]
