@@ -30,39 +30,6 @@
 #           wait_for_children(), warn()
 #           For other pre-requisites see the documentation in display_usage()
 #
-# @(#) HISTORY:
-# @(#) 2014-12-16: initial version (VRF 1.0.0) [Patrick Van der Veken]
-# @(#) 2014-12-20: updated SELinux contexts (VRF 1.0.1) [Patrick Van der Veken]
-# @(#) 2015-01-05: added backup feature, see --backup (VRF 1.1.0) [Patrick Van der Veken]
-# @(#) 2015-01-19: updated display_usage() (VRF 1.1.1) [Patrick Van der Veken]
-# @(#) 2015-02-03: use 'sudo -n' (VRF 1.1.2) [Patrick Van der Veken]
-# @(#) 2015-04-10: fix in --fix-local routine (VRF 1.1.3) [Patrick Van der Veken]
-# @(#) 2015-05-16: added SSH_OWNER_GROUP (VRF 1.1.4) [Patrick Van der Veken]
-# @(#) 2015-08-15: moved essential configuration items of the script into a
-# @(#)             separate configuration file (global/local), fix in
-# @(#)             wait_for_children (VRF 1.2.0) [Patrick Van der Veken]
-# @(#) 2015-08-26: added DO_SFTP_CHMOD configuration parameter to avoid
-# @(#)             setstat failures with sftp_file() when remote file
-# @(#)             permissions do not allow (VRF 1.2.1) [Patrick Van der Veken]
-# @(#) 2015-08-28: check_config() update (VRF 1.2.2) [Patrick Van der Veken]
-# @(#) 2015-09-04: fix in wait_for_children (VRF 1.2.3) [Patrick Van der Veken]
-# @(#) 2015-09-06: proper error checking in fix2host(), update2host() by using
-# @(#)             logc() (VRF 1.3.0) [Patrick Van der Veken]
-# @(#) 2015-09-09: better handling of leading log sigils in die(), log(), logc()
-# @(#)             and warn(), fix in count_fields(), failure in local update
-# @(#)             should be die() (VRF 1.3.1) [Patrick Van der Veken]
-# @(#) 2015-09-15: small fix in wait_for_children() (VRF 1.3.2) [Patrick Van der Veken]
-# @(#) 2015-09-23: added $GLOBAL_CONFIG_FILE to fix ownership/permissions routine
-# @(#)             (VRF 1.3.3) [Patrick Van der Veken]
-# @(#) 2015-09-27: added SSH host keys discovery, re-assigned '-d' command-line
-# @(#)             option to this function (VRF 1.4.0) [Patrick Van der Veken]
-# @(#) 2015-10-03: added --slave option, 3 new configuration parameters & supporting
-# @(#)             functions for master->slave operations, several bug fixes
-# @(#)             (VRF 1.5.0) [Patrick Van der Veken]
-# @(#) 2015-10-09: simplified handling of SSH agent handling, obsoleted
-# @(#)             DO_SLAVE_SSH_AGENT option (VRF 1.5.1) [Patrick Van der Veken]
-# @(#) 2015-12-13: fix for DO_SLAVE, improved check_root_user() calls
-# @(#)             (VRF 1.5.2) [Patrick Van der Veken]
 # -----------------------------------------------------------------------------
 # DO NOT CHANGE THIS FILE UNLESS YOU KNOW WHAT YOU ARE DOING!
 #******************************************************************************
@@ -76,7 +43,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the V.R.F (version/release/fix)
-MY_VRF="1.5.2"
+MY_VRF="1.5.4"
 # name of the global configuration file (script)
 GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -1329,6 +1296,13 @@ do
                 exit 1
             }
             ARG_ACTION=2
+            ;;
+        -m|-make-finger|--make-finger)
+            (( ARG_ACTION )) && {
+                print -u2 "ERROR: multiple actions specified"
+                exit 1
+            }
+            ARG_ACTION=3
             ;;
         -d|-discover|--discover)
             (( ARG_ACTION )) && {
