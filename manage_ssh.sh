@@ -23,10 +23,10 @@
 # EXPECTS: (see --help for more options)
 # REQUIRES: check_config(), check_logging(), check_params(), check_root_user(),
 #           check_setup(), check_syntax(), count_fields(), die(), display_usage(),
-#           distribute2host(), distribute2slave(), do_cleanup(), fix2host(), 
-#           fix2slave(), get_linux_name(), get_linux_version(), log(), logc(), 
+#           distribute2host(), distribute2slave(), do_cleanup(), fix2host(),
+#           fix2slave(), get_linux_name(), get_linux_version(), log(), logc(),
 #           resolve_host(), sftp_file(),  start_ssh_agent(), stop_ssh_agent(),
-#           update2host(), update2slave(), update_fingerprints(), 
+#           update2host(), update2slave(), update_fingerprints(),
 #           wait_for_children(), warn()
 #           For other pre-requisites see the documentation in display_usage()
 #
@@ -43,7 +43,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the V.R.F (version/release/fix)
-MY_VRF="1.5.4"
+MY_VRF="1.6.0"
 # name of the global configuration file (script)
 GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -69,6 +69,7 @@ KEY_1024_COUNT=0
 KEY_2048_COUNT=0
 KEY_4096_COUNT=0
 KEY_OTHER_COUNT=0
+SSH_KEYGEN_OPTS=""
 TMP_FILE="${TMP_DIR}/.${SCRIPT_NAME}.$$"
 TMP_RC_FILE="${TMP_DIR}/.${SCRIPT_NAME}.rc.$$"
 # command-line parameters
@@ -536,7 +537,7 @@ function distribute2host
 SERVER="$1"
 ERROR_COUNT=0
 # convert line to hostname
-SERVER=${SERVER%%;*}
+SERVER=${SERVER%%\;*}
 resolve_host ${SERVER}
 if (( $? ))
 then
@@ -1129,17 +1130,24 @@ FINGER_LINE="$1"
 
 # line should have 3 fields
 FINGER_FIELDS=$(count_fields "${FINGER_LINE}" ",")
-(( FINGER_FIELDS != 3 )) && \die "line '${FINGER_LINE}' has missing or too many field(s) (should be 3))"
+(( FINGER_FIELDS != 3 )) && die "line '${FINGER_LINE}' has missing or too many field(s) (should be 3))"
 
 # create fingerprint
 FINGER_USER="$(print ${FINGER_LINE} | awk -F, '{print $1}')"
-print "${FINGER_LINE}" | awk -F, '{print $2," ",$3}' > ${TMP_FILE}
+print "${FINGER_LINE}" | awk -F, '{print $2 " " $3}' > ${TMP_FILE}
 # check if fingerprint is valid
-FINGERPRINT="$(ssh-keygen -l -f ${TMP_FILE} 2>&1)"
+FINGERPRINT="$(ssh-keygen ${SSH_KEYGEN_OPTS} -l -f ${TMP_FILE} 2>&1)"
 FINGER_RC=$?
 if (( ! FINGER_RC ))
 then
-    FINGER_ENTRY="$(print ${FINGERPRINT} | awk '{print $1,$2,$4}')"
+    case "${OS_NAME}" in
+    HP-UX)
+        FINGER_ENTRY="$(print ${FINGERPRINT} | awk '{print $1,$2,$4}')"
+        ;;
+    *)
+        FINGER_ENTRY="$(print ${FINGERPRINT} | awk '{print $1,$2,$5}')"
+        ;;
+    esac
     log "${FINGER_USER}->${FINGER_ENTRY}"
     print "${FINGER_USER} ${FINGER_ENTRY}" >> "${LOCAL_DIR}/fingerprints"
 else
@@ -1187,7 +1195,7 @@ do
         else
             wait ${PID}
             RC=$?
-            if (( ${RC} ))
+            if (( RC ))
             then
                 warn "child process ${PID} exited [RC=${RC}]"
                 WAIT_ERRORS=$(( WAIT_ERRORS + 1 ))
@@ -1431,7 +1439,7 @@ case ${ARG_ACTION} in
         # check for root or non-root model
         if [[ "${SSH_UPDATE_USER}" != "root" ]]
         then
-			check_root_user && die "must NOT be run as user 'root'"
+            check_root_user && die "must NOT be run as user 'root'"
         fi
         # start SSH agent (if needed)
         if (( DO_SSH_AGENT && CAN_START_AGENT ))
@@ -1491,7 +1499,7 @@ case ${ARG_ACTION} in
         # check for root or non-root model
         if [[ "${SSH_TRANSFER_USER}" != "root" ]]
         then
-			check_root_user && die "must NOT be run as user 'root'"
+            check_root_user && die "must NOT be run as user 'root'"
         fi
         # start SSH agent (if needed)
         if (( DO_SSH_AGENT && CAN_START_AGENT ))
@@ -1550,10 +1558,35 @@ case ${ARG_ACTION} in
         # check for root or non-root model
         if [[ "${SSH_UPDATE_USER}" != "root" ]]
         then
-			check_root_user && die "must NOT be run as user 'root'"
+            check_root_user && die "must NOT be run as user 'root'"
         fi
         log "ACTION: create key fingerprints into ${LOCAL_DIR}/fingerprints"
         > "${LOCAL_DIR}/fingerprints"
+
+        # check fingerprint type
+        if [[ -n "${FINGERPRINT_TYPE}" ]]
+        then
+            case "${FINGERPRINT_TYPE}" in
+                md5|sha256|MD5|SHA256)
+                    log "fingerprinting with type: ${FINGERPRINT_TYPE}"
+                    ;;
+                *)
+                    die "unknown fingerprint type specified in the configuration file"
+                    ;;
+            esac
+        else
+            FINGERPRINT_TYPE="md5"
+            log "fingerprinting with type: ${FINGERPRINT_TYPE}"
+        fi
+
+        # check if ssh-keygen support fingerprint type
+        FAIL_SSH_KEYGEN=$(ssh-keygen -E 2>&1 | grep -c "illegal")
+        if (( ! FAIL_SSH_KEYGEN ))
+        then
+            SSH_KEYGEN_OPTS="-E ${FINGERPRINT_TYPE}"
+        else
+            warn "ssh-keygen only supports MD5 fingerprinting, regardless of your choice"
+        fi
 
         # are keys stored in a file or a directory?
         if [[ -n "${KEYS_DIR}" ]]
@@ -1601,7 +1634,7 @@ case ${ARG_ACTION} in
         fi
 
         # check if the SSH control repo is already there
-        if [[ ${FIX_CREATE} -eq 1 && ! -d "${FIX_DIR}" ]]
+        if (( FIX_CREATE )) && [[ ! -d "${FIX_DIR}" ]]
         then
             # create stub directories
             mkdir -p "${FIX_DIR}/holding" 2>/dev/null || \
@@ -1690,7 +1723,7 @@ case ${ARG_ACTION} in
         # check for root or non-root model
         if [[ "${SSH_UPDATE_USER}" != "root" ]]
         then
-			check_root_user && die "must NOT be run as user 'root'"
+            check_root_user && die "must NOT be run as user 'root'"
         fi
         # start SSH agent (if needed)
         if (( DO_SSH_AGENT && CAN_START_AGENT ))
