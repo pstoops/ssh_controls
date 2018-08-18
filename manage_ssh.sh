@@ -537,7 +537,7 @@ function distribute2host
 SERVER="$1"
 ERROR_COUNT=0
 # convert line to hostname
-SERVER=${SERVER%%\;*}
+SERVER=${SERVER%%;*}
 resolve_host ${SERVER}
 if (( $? ))
 then
