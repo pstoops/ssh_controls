@@ -53,8 +53,8 @@ TMP_DIR="/var/tmp"
 # ------------------------- CONFIGURATION ends here ---------------------------
 # miscelleaneous
 PATH=${PATH}:/usr/bin:/usr/local/bin
-SCRIPT_NAME=$(basename $0)
-SCRIPT_DIR=$(dirname $0)
+SCRIPT_NAME="$(basename $0)"
+SCRIPT_DIR="$(dirname $0)"
 OS_NAME="$(uname)"
 HOST_NAME="$(hostname)"
 KEYS_FILE=""
