@@ -43,7 +43,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the V.R.F (version/release/fix)
-MY_VRF="1.6.0"
+MY_VRF="1.7.0"
 # name of the global configuration file (script)
 GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -208,7 +208,7 @@ fi
 # --local-dir
 if [[ -n "${ARG_LOCAL_DIR}" ]]
 then
-    if [ \( ! -d "${ARG_LOCAL_DIR}" \) -o \( ! -r "${ARG_LOCAL_DIR}" \) ]
+    if [[ ! -d "${ARG_LOCAL_DIR}" ]] || [[ ! -r "${ARG_LOCAL_DIR}" ]]
     then
         print -u2 "ERROR: unable to read directory ${ARG_LOCAL_DIR}"
         exit 1
@@ -239,7 +239,7 @@ fi
 # --targets
 if [[ -n "${ARG_TARGETS}" ]]
 then
-    > ${TMP_FILE}
+    : > ${TMP_FILE}
     # write comma-separated target list to the temporary file
     print "${ARG_TARGETS}" | tr -s ',' '\n' | while read TARGET_HOST
     do
@@ -262,7 +262,7 @@ return 0
 # -----------------------------------------------------------------------------
 function check_root_user
 {
-(IFS='()'; set -- $(id); print $2) | read UID
+(IFS='()'; set -- "$(id)"; print $2) | read UID
 if [[ "${UID}" = "root" ]]
 then
     return 0
@@ -834,6 +834,7 @@ return 0
 
 # -----------------------------------------------------------------------------
 # log an INFO: message (via STDIN). Do not use when STDIN is still open
+# shellcheck disable=SC2120
 function logc
 {
 NOW="$(date '+%d-%h-%Y %H:%M:%S')"
@@ -936,9 +937,7 @@ return 0
 # resolve a host (check)
 function resolve_host
 {
-LOOKUP_HOST="$1"
-
-nslookup $1 2>/dev/null | grep -q -E -e 'Address:.*([0-9]{1,3}[\.]){3}[0-9]{1,3}'
+nslookup "$1" 2>/dev/null | grep -q -E -e 'Address:.*([0-9]{1,3}[\.]){3}[0-9]{1,3}'
 
 return $?
 }
@@ -956,7 +955,9 @@ TRANSFER_PERMS="${TRANSFER_FILE##*!}"
 # cut out the permission bits and the directory path
 TRANSFER_FILE="${TRANSFER_FILE%!*}"
 SOURCE_FILE="${TRANSFER_FILE##*/}"
-OLD_PWD=$(pwd) && cd ${TRANSFER_DIR}
+# shellcheck disable=SC2164
+OLD_PWD=$(pwd)
+cd ${TRANSFER_DIR} || return 1
 
 # transfer, (possibly) chmod the file to/on the target server (keep STDERR)
 if (( DO_SFTP_CHMOD ))
@@ -975,7 +976,7 @@ EOT
     SFTP_RC=$?
 fi
 
-cd ${OLD_PWD}
+cd ${OLD_PWD} || return 1
 
 return ${SFTP_RC}
 }
@@ -992,7 +993,7 @@ then
     log "SSH agent already running on ${HOST_NAME} with PID: ${SSH_AGENT_PID}"
 else
     # start the SSH agent
-    eval $(ssh-agent) >/dev/null 2>/dev/null
+    eval "$(ssh-agent)" >/dev/null 2>/dev/null
 
     if [[ -z "${SSH_AGENT_PID}" ]]
     then
@@ -1186,7 +1187,7 @@ do
     do
         shift
         # child is still alive?
-        if $(kill -0 ${PID} 2>/dev/null)
+        if kill -0 ${PID} 2>/dev/null
         then
             (( ARG_DEBUG )) && print -u2 "DEBUG: ${PID} is still alive"
             set -- "$@" "${PID}"
@@ -1270,7 +1271,7 @@ return 0
 #******************************************************************************
 
 # parse arguments/parameters
-CMD_LINE="$@"
+CMD_LINE="$*"
 for PARAMETER in ${CMD_LINE}
 do
     case ${PARAMETER} in
@@ -1412,10 +1413,12 @@ if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" || -r "${SCRIPT_DIR}/${LOCAL_CONF
 then
     if [[ -r "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}" ]]
     then
+        # shellcheck source=/dev/null
         . "${SCRIPT_DIR}/${GLOBAL_CONFIG_FILE}"
     fi
     if [[ -r "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}" ]]
     then
+        # shellcheck source=/dev/null
         . "${SCRIPT_DIR}/${LOCAL_CONFIG_FILE}"
     fi
 else
@@ -1463,7 +1466,7 @@ case ${ARG_ACTION} in
         }
         # set max updates in background
         COUNT=${MAX_BACKGROUND_PROCS}
-        for CLIENT in ${CLIENTS[@]}
+        for CLIENT in "${CLIENTS[@]}"
         do
             if (( DO_SLAVE ))
             then
@@ -1523,7 +1526,7 @@ case ${ARG_ACTION} in
         }
         # set max updates in background
         COUNT=${MAX_BACKGROUND_PROCS}
-        for CLIENT in ${CLIENTS[@]}
+        for CLIENT in "${CLIENTS[@]}"
         do
             if (( DO_SLAVE ))
             then
@@ -1561,7 +1564,7 @@ case ${ARG_ACTION} in
             check_root_user && die "must NOT be run as user 'root'"
         fi
         log "ACTION: create key fingerprints into ${LOCAL_DIR}/fingerprints"
-        > "${LOCAL_DIR}/fingerprints"
+        : > "${LOCAL_DIR}/fingerprints"
 
         # check fingerprint type
         if [[ -n "${FINGERPRINT_TYPE}" ]]
@@ -1714,7 +1717,7 @@ case ${ARG_ACTION} in
                     ;;
             esac
         else
-            die "SSH controls repository at "${FIX_DIR}" does not exist?"
+            die "SSH controls repository at ${FIX_DIR} does not exist?"
         fi
         log "finished applying fixes to the local SSH control repository"
         ;;
@@ -1752,7 +1755,7 @@ case ${ARG_ACTION} in
         }
         # set max updates in background
         COUNT=${MAX_BACKGROUND_PROCS}
-        for CLIENT in ${CLIENTS[@]}
+        for CLIENT in "${CLIENTS[@]}"
         do
             if (( DO_SLAVE ))
             then
@@ -1799,7 +1802,7 @@ case ${ARG_ACTION} in
         then
             TIMESTAMP="$(date '+%Y%m%d-%H%M')"
             BACKUP_TAR_FILE="${BACKUP_DIR}/backup_repo_${TIMESTAMP}.tar"
-            if [ \( -f ${BACKUP_TAR_FILE} \) -o \( -f "${BACKUP_TAR_FILE}.gz" \) ]
+            if [[ -f ${BACKUP_TAR_FILE} ]] || [[ -f "${BACKUP_TAR_FILE}.gz" ]]
             then
                 die "backup file ${BACKUP_TAR_FILE}(.gz) already exists"
             fi
