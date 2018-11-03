@@ -18,13 +18,13 @@ SSH Controls is a light-weight SSH **public key** distribution & management fram
 
 * allows the use of (nested) **groups** in the master configuration: users, keys and hosts can be grouped in the SSH master configuration files to allow a simplified configuration. Nesting of groups is allowed up to *5 levels* deep.
 
-* allow the use of (nested) **groups** in the specification of the *push* targets. Either via the `--targets` command-line parameter or via the `targets` configuration file.
+* allows the use of (nested) **groups** in the specification of the *push* targets. Either via the `--targets` command-line parameter or via the `targets` configuration file.
 
 * allows compromised public keys to be **blacklisted**: SSH Controls will deny the use of public keys that have been administrative blacklisted. Blacklisting happens on the SSH master and is applied to all client hosts.
 
 * can discover host public keys to (re)create `known_hosts` file(s) for a large amount of hosts
 
-* supports *md5* and *sha512* fingerprint **hashes** (if the installed SSH version support these hash types)
+* supports *md5* and *sha512* fingerprint **hashes** (if the installed SSH version supports these hash types)
 
 * requires **no client agent** component and is **stateless**: SSH Controls performs operations by pushing keys or commands to client hosts. Update processes on the client hosts will only be started on-demand. If the SSH master is - for whatever reason - unavailable then active keys on a client host remain in place and logons are still possible.
 
