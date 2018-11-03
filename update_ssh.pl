@@ -41,23 +41,25 @@ use Pod::Usage;
 #******************************************************************************
 
 # ------------------------- CONFIGURATION starts here -------------------------
-# define the V.R.F (version/release/fix)
-my $MY_VRF = "1.2.0";
+# define the version (YYYY-MM-DD)
+my $script_version = "2018-11-03";
 # name of global configuration file (no path, must be located in the script directory)
 my $global_config_file = "update_ssh.conf";
 # name of localized configuration file (no path, must be located in the script directory)
 my $local_config_file = "update_ssh.conf.local";
+# maxiumum level of recursion for alias resolution
+my $max_recursion = 5;
 # selinux context labels of key files for different RHEL version
-my %selinux_contexts = ( '5' => 'sshd_key_t', 
-                         '6' => 'ssh_home_t', 
+my %selinux_contexts = ( '5' => 'sshd_key_t',
+                         '6' => 'ssh_home_t',
                          '7' => 'ssh_home_t');
-# ------------------------- CONFIGURATION ends here --------------------------- 
+# ------------------------- CONFIGURATION ends here ---------------------------
 # initialize variables
 my ($debug, $verbose, $preview, $remove, $global, $use_fqdn) = (0,0,0,0,0,0);
 my (@config_files, @zombie_files, $access_dir, $blacklist_file);
 my (%options, @uname, @pwgetent, @accounts, %aliases, %keys, %access, @blacklist);
 my ($os, $hostname, $run_dir);
-my ($selinux_status, $selinux_context, $linux_version, $has_selinux) = ("","","",0);
+my ($selinux_status, $selinux_context, $linux_version, $has_selinux, $recursion_count) = ("","","",0,1);
 $|++;
 
 
@@ -67,7 +69,7 @@ $|++;
 
 # -----------------------------------------------------------------------------
 sub do_log {
-    
+
     my $message = shift;
 
     if ($message =~ /^ERROR:/ || $message =~ /^WARN:/) {
@@ -118,7 +120,7 @@ sub parse_config_file {
             }
         }
     }
-    
+
     return (1);
 }
 
@@ -132,7 +134,7 @@ sub resolve_aliases
     foreach $entry (@tmp_array) {
         if ($entry =~ /^\@/) {
             ($aliases{$entry})
-                ? push (@new_array, @{$aliases{$entry}}) 
+                ? push (@new_array, @{$aliases{$entry}})
                 : do_log ("WARN: unable to resolve alias $entry [$hostname]");
         } else {
             ($entry)
@@ -147,14 +149,14 @@ sub resolve_aliases
 sub set_file {
 
     my ($file, $perm, $uid, $gid) = @_;
-    
-    chmod ($perm, "$file") 
+
+    chmod ($perm, "$file")
         or do_log ("ERROR: cannot set permissions on $file [$! $hostname]")
         and exit (1);
     chown ($uid, $gid, "$file")
         or do_log ("ERROR: cannot set ownerships on $file [$! $hostname]")
-        and exit (1);   
-        
+        and exit (1);
+
     return (1);
 }
 
@@ -180,12 +182,12 @@ if ( @ARGV > 0 ) {
                 version|V
             )) || pod2usage(-verbose => 0);
 }
-pod2usage(-verbose => 0) unless (%options);         
-            
+pod2usage(-verbose => 0) unless (%options);
+
 # check version parameter
 if ($options{'version'}) {
     $verbose = 1;
-    do_log ("INFO: $0: version $MY_VRF");
+    do_log ("INFO: $0: version $script_version");
     exit (0);
 }
 # check help parameter
@@ -202,7 +204,7 @@ if ($options{'preview'}) {
     $preview = 1;
     $verbose = 1;
     if ($global) {
-        do_log ("INFO: running in GLOBAL PREVIEW mode");    
+        do_log ("INFO: running in GLOBAL PREVIEW mode");
     } else {
         do_log ("INFO: running in PREVIEW mode");
     }
@@ -234,7 +236,7 @@ do_log ("INFO: parsing configuration file(s) ...");
 push (@config_files, "$run_dir/$global_config_file") if (-f "$run_dir/$global_config_file");
 push (@config_files, "$run_dir/$local_config_file") if (-f "$run_dir/$local_config_file");
 unless (@config_files) {
-    do_log ("ERROR: unable to find any configuration file, bailing out [$hostname]") 
+    do_log ("ERROR: unable to find any configuration file, bailing out [$hostname]")
     and exit (1);
 }
 
@@ -249,7 +251,7 @@ unless ($preview and $global) {
     if (-d $access_dir) {
         do_log ("INFO: host is under SSH control via $access_dir");
     } else {
-        do_log ("ERROR: host is not under SSH keys only control [$hostname]") 
+        do_log ("ERROR: host is not under SSH keys only control [$hostname]")
         and exit (1);
     }
 }
@@ -259,14 +261,14 @@ unless ($preview and $global) {
     do_log ("INFO: checking for keys blacklist file ...");
     if (-f $blacklist_file) {
         open (BLACKLIST, "<", $blacklist_file) or \
-            do_log ("ERROR: cannot read keys blacklist file [$! $hostname]") 
+            do_log ("ERROR: cannot read keys blacklist file [$! $hostname]")
                 and exit (1);
         @blacklist = <BLACKLIST>;
         close (BLACKLIST);
         do_log ("INFO: keys blacklist file found with ".scalar (@blacklist)." entr(y|ies) on $hostname");
         print Dumper (\@blacklist) if $debug;
     } else {
-        do_log ("WARN: no keys blacklist file found [$hostname]");  
+        do_log ("WARN: no keys blacklist file found [$hostname]");
     }
 }
 
@@ -276,7 +278,7 @@ $os = $uname[0];
 # who am I?
 unless ($preview and $global) {
     if ($< != 0) {
-        do_log ("ERROR: script must be invoked as user 'root' [$hostname]") 
+        do_log ("ERROR: script must be invoked as user 'root' [$hostname]")
         and exit (1);
     }
 }
@@ -301,7 +303,7 @@ while (@pwgetent = getpwent()) {
     push (@accounts, $pwgetent[0]);
 }
 
-# remove duplicates (which should not happen (!) but local, LDAP and accounts 
+# remove duplicates (which should not happen (!) but local, LDAP and accounts
 # from other sources might trample over each other)
 my %uniq_accounts = map { $_, 0 } @accounts;
 @accounts = keys %uniq_accounts;
@@ -310,7 +312,7 @@ do_log ("INFO: ".scalar (@accounts)." user accounts found on $hostname");
 print Dumper (\@accounts) if $debug;
 
 # -----------------------------------------------------------------------------
-# read aliases for teams, servers and users
+# read aliases for teams, servers and users (and resolve group definitions)
 # result: %aliases
 # -----------------------------------------------------------------------------
 
@@ -321,7 +323,7 @@ open (ALIASES, "<", "${run_dir}/alias")
 while (<ALIASES>) {
 
     my ($key, $value, @values);
-    
+
     chomp ();
     next if (/^$/ || /\#/);
     s/\s+//g;
@@ -334,13 +336,45 @@ close (ALIASES);
 do_log ("DEBUG: dumping unexpanded aliases:");
 print Dumper (\%aliases) if $debug;
 
-# we can nest aliases one level deep, so do a one-level recursive sort of lookup
-# of the remaining '@' aliases. Input should be passed as comma-separated
-# string to resolve_aliases so don't forget to smash everything back together
-# first.
-foreach my $key (keys (%aliases)) {
-
-    $aliases{$key} = [resolve_aliases (join (",", @{$aliases{$key}}))]; 
+# resolve aliases recursively to a maxium of $max_recursion
+while ($recursion_count <= $max_recursion) {
+    # crawl over all items in the hash %aliases
+    foreach my $key (keys (%aliases)) {
+        # crawl over all items in the array @{aliases{$key}}
+        my @new_array; my @filtered_array;  # these are the working stashes
+        do_log ("DEBUG: expanded alias $key before recursion $recursion_count [$hostname]");
+        print Dumper (\@{$aliases{$key}}) if $debug;
+        foreach my $item (@{$aliases{$key}}) {
+            # is it a group?
+            if ($item =~ /^\@/) {
+                # expand the group if it exists
+                if ($aliases{$item}) {
+                    # add current and new items to the working stash
+                    if (@new_array) {
+                        push (@new_array, @{$aliases{$item}});
+                    } else {
+                        @new_array = (@{$aliases{$key}}, @{$aliases{$item}});
+                    }
+                    # remove the original group item from the working stash
+                    @filtered_array = grep { $_ ne $item } @new_array;
+                    @new_array = @filtered_array;
+                } else {
+                    do_log ("WARN: unable to resolve alias $item [$hostname]");
+                }
+            # no group, just add the item as-is to working stash
+            } else {
+                push (@new_array, $item);
+            }
+        }
+        # filter out dupes
+        my %seen;
+        @filtered_array = grep { not $seen{$_}++ } @new_array;
+        # re-assign working stash back to our original hash key
+        @{$aliases{$key}} = @filtered_array;
+        do_log ("DEBUG: expanded alias $key after recursion $recursion_count [$hostname]");
+        print Dumper (\@{$aliases{$key}}) if $debug;
+    }
+    $recursion_count++;
 }
 
 do_log ("INFO: ".scalar (keys (%aliases))." aliases found on $hostname");
@@ -364,18 +398,18 @@ if (-d "${run_dir}/keys.d" && -f "${run_dir}/keys") {
 if (-d "${run_dir}/keys.d") {
     do_log ("INFO: local 'keys' are stored in a DIRECTORY on $hostname");
     opendir (KEYS_DIR, "${run_dir}/keys.d")
-        or do_log ("ERROR: cannot open 'keys.d' directory [$! $hostname]") 
+        or do_log ("ERROR: cannot open 'keys.d' directory [$! $hostname]")
         and exit (1);
     while (my $key_file = readdir (KEYS_DIR)) {
         next if ($key_file =~ /^\./);
         push (@key_files, "${run_dir}/keys.d/$key_file");
     }
-    closedir (KEYS_DIR);    
+    closedir (KEYS_DIR);
 } elsif (-f "${run_dir}/keys") {
     do_log ("INFO: local 'keys' are stored in a FILE on $hostname");
     push (@key_files, "${run_dir}/keys");
 } else {
-    do_log ("ERROR: cannot find any public keys in the repository! [$hostname]") 
+    do_log ("ERROR: cannot find any public keys in the repository! [$hostname]")
     and exit (1);
 }
 
@@ -390,7 +424,7 @@ foreach my $key_file (@key_files) {
 
         chomp ();
         next if (/^$/ || /\#/);
-    
+
         # check for blacklisting
         my $key_line = $_;
         if (grep (/\Q${key_line}\E/, @blacklist)) {
@@ -412,8 +446,8 @@ print Dumper(\%keys) if $debug;
 
 # -----------------------------------------------------------------------------
 # read access definitions
-# result: %access (hash of arrays). The keys are the accounts for which 
-# access control has been defined for this server. The values are an array 
+# result: %access (hash of arrays). The keys are the accounts for which
+# access control has been defined for this server. The values are an array
 # with all the people who can access the account.
 # -----------------------------------------------------------------------------
 
@@ -424,7 +458,7 @@ open (ACCESS, "<", "${run_dir}/access")
 while (<ACCESS>) {
 
     my ($who, $where, $what, @who, @where, @what);
-    
+
     chomp ();
     next if (/^$/ || /\#/);
     s/\s+//g;
@@ -437,14 +471,14 @@ while (<ACCESS>) {
         do_log ("WARN: ignoring line $. in 'access' due to missing/non-resolving values [$hostname]");
         next;
     }
-    
+
     foreach my $account (sort (@what)) {
-        
+
         my @new_array;
-    
+
         foreach my $server (sort (@where)) {
             foreach my $person (sort (@who)) {
-                do_log ("DEBUG: adding access for $account to $person on $server in \%access") 
+                do_log ("DEBUG: adding access for $account to $person on $server in \%access")
                     if ($server eq $hostname);
                 # add person to access list if the entry is for this host
                 push (@new_array, $person) if ($server eq $hostname);
@@ -477,7 +511,7 @@ if ($preview && $global) {
     while (<ACCESS>) {
 
         my ($who, $where, $what, @who, @where, @what);
-    
+
         chomp ();
         next if (/^$/ || /\#/);
         s/\s+//g;
@@ -490,14 +524,14 @@ if ($preview && $global) {
             do_log ("WARN: ignoring line $. in 'access' due to missing/non-resolving values [$hostname]");
             next;
         }
-    
+
         foreach my $account (sort (@what)) {
-        
+
             my @new_array;
-    
+
             foreach my $server (sort (@where)) {
                 foreach my $person (sort (@who)) {
-                    do_log ("$person|$server|$account") 
+                    do_log ("$person|$server|$account")
                 }
             }
         }
@@ -523,7 +557,7 @@ unless ($preview) {
             if ($selinux_status eq "Permissive" or $selinux_status eq "Enforcing") {
                 do_log ("INFO: runtime info: detected active SELinux system on $hostname");
                 $has_selinux = 1;
-            } 
+            }
             # figure out RHEL version (via lsb_release or /etc/redhat-release)
             $linux_version = qx#/usr/bin/lsb_release -rs 2>/dev/null | /usr/bin/cut -f1 -d'.'#;
             chomp ($linux_version);
@@ -539,7 +573,7 @@ unless ($preview) {
                     $release_string =~ m/release 6/i && do {
                         $linux_version = 6;
                         last SWITCH_RELEASE;
-                    };          
+                    };
                     $release_string =~ m/release 7/i && do {
                         $linux_version = 7;
                         last SWITCH_RELEASE;
@@ -547,7 +581,7 @@ unless ($preview) {
                 }
             }
             # use fall back in case we cannot determine the version
-            if (not (defined ($linux_version)) or $linux_version eq "") {               
+            if (not (defined ($linux_version)) or $linux_version eq "") {
                 $selinux_context = 'etc_t';
                 $linux_version = 'unknown';
             } else {
@@ -557,21 +591,21 @@ unless ($preview) {
                 do_log ("INFO: runtime info: OS major version $linux_version, SELinux context $selinux_context on $hostname");
             } else {
                 do_log ("INFO: runtime info: OS major version $linux_version on $hostname");
-            }   
-            last SWITCH_OS; 
+            }
+            last SWITCH_OS;
         };
     }
 }
 
-# only add authorized_keys for existing accounts, 
+# only add authorized_keys for existing accounts,
 # otherwise revoke access if needed
 foreach my $account (sort (@accounts)) {
-    
+
     my $access_file = "$access_dir/$account";
-    
-    # only add authorised_keys if there are access definitions 
+
+    # only add authorised_keys if there are access definitions
     if ($access{$account}) {
-    
+
         unless ($preview) {
             open (KEYFILE, "+>", $access_file)
                 or do_log ("ERROR: cannot open file for writing in $access_dir [$! $hostname]")
@@ -583,11 +617,11 @@ foreach my $account (sort (@accounts)) {
             # only add authorized_keys if $person actually has a key
             if (exists ($keys{$person})) {
                 # only add authorized_keys if $person actually has an account
-                print KEYFILE "$keys{$person}{keytype} $keys{$person}{key} $real_name\n" 
+                print KEYFILE "$keys{$person}{keytype} $keys{$person}{key} $real_name\n"
                     unless $preview;
                 do_log ("INFO: granting access to $account for $real_name on $hostname");
             } else {
-                do_log ("INFO: denying access (no key) to $account for $real_name on $hostname");            
+                do_log ("INFO: denying access (no key) to $account for $real_name on $hostname");
             }
         }
         close (KEYFILE) unless $preview;
@@ -597,12 +631,12 @@ foreach my $account (sort (@accounts)) {
             set_file ($access_file, 0644, 0, 0);
             # selinux labels
             SWITCH: {
-                $os eq "Linux" && do { 
+                $os eq "Linux" && do {
                     if ($has_selinux) {
                         system ("/usr/bin/chcon -t $selinux_context $access_file") and
                             do_log ("WARN: failed to set SELinux context $selinux_context on $access_file [$hostname]");
                     };
-                    last SWITCH; 
+                    last SWITCH;
                 }
             }
         }
@@ -621,14 +655,14 @@ foreach my $account (sort (@accounts)) {
 }
 
 # -----------------------------------------------------------------------------
-# alert on/remove extraneous authorized_keys files 
+# alert on/remove extraneous authorized_keys files
 # (access files for which no longer a valid UNIX account exists)
 # -----------------------------------------------------------------------------
 
 do_log ("INFO: checking for extraneous access files ....");
 
 opendir (ACCESS_DIR, $access_dir)
-    or do_log ("ERROR: cannot open directory $access_dir [$! $hostname]") 
+    or do_log ("ERROR: cannot open directory $access_dir [$! $hostname]")
     and exit (1);
 while (my $access_file = readdir (ACCESS_DIR)) {
     next if ($access_file =~ /^\./);
@@ -644,7 +678,7 @@ print Dumper (\@zombie_files) if $debug;
 # remove if requested and needed
 if ($remove && @zombie_files) {
     my $count = unlink (@zombie_files)
-        or do_log ("ERROR: cannot remove extraneous access file(s) [$! $hostname]") 
+        or do_log ("ERROR: cannot remove extraneous access file(s) [$! $hostname]")
         and exit (1);
     do_log ("INFO: $count extraneous access files removed $hostname");
 }
@@ -667,20 +701,20 @@ update_ssh.pl - distributes SSH public keys in a desired state model.
 
 =head1 SYNOPSIS
 
-    update_ssh.pl[-d|--debug] 
-                 [-h|--help] 
+    update_ssh.pl[-d|--debug]
+                 [-h|--help]
                  ([-p|--preview] [-g|--global]) | [-r|--remove]
                  [-v|--verbose]
                  [-V|--version]
 
-                 
+
 =head1 DESCRIPTION
 
 B<update_ssh.pl> distributes SSH keys to the appropriate files (.e. 'authorized_keys') into the C<$access_dir> repository based on the F<access>, F<alias> and F<keys> files.
-This script should be run on each host where SSH key authentication is the exclusive method of (remote) authentication. 
+This script should be run on each host where SSH key authentication is the exclusive method of (remote) authentication.
 
-For update SSH public keys must be stored in a generic F<keys> file within the same directory as B<update_ssh.pl> script. 
-Alternatively key files may be stored as set of individual key files within a called sub-directory called F<keys.d>. 
+For update SSH public keys must be stored in a generic F<keys> file within the same directory as B<update_ssh.pl> script.
+Alternatively key files may be stored as set of individual key files within a called sub-directory called F<keys.d>.
 Both methods are mutually exclusive and the latter always take precedence.
 
 =head1 CONFIGURATION
@@ -693,7 +727,7 @@ B<update_ssh.pl> requires the presence of at least one of the following configur
 
 =item * F<update_ssh.conf.local>
 
-=back 
+=back
 
 Use F<update_ssh.conf.local> for localized settings per host. Settings in the localized configuration file will always override other values.
 
@@ -746,12 +780,12 @@ S<       >Remove any extraneous 'authorized_keys' files (i.e. belonging to non-e
 =item -v | --verbose
 
 S<       >Be verbose during exection.
-       
+
 =item -V | --version
 
 S<       >Show version of the script.
 
-=back 
+=back
 
 =head1 NOTES
 
@@ -761,16 +795,8 @@ S<       >Show version of the script.
 
 =item * Options may be bundled (e.g. -vp)
 
-=back 
+=back
 
 =head1 AUTHOR
 
 (c) KUDOS BVBA, Patrick Van der Veken
-
-=head1 history
-
-@(#) 2014-12-04: VRF 1.0.0: first version [Patrick Van der Veken]
-@(#) 2014-12-16: VRF 1.0.1: added SELinux context, new config option 'selinux_context' [Patrick Van der Veken]
-@(#) 2015-08-08: VRF 1.0.2: small fix for 'cut' command [Patrick Van der Veken]
-@(#) 2015-08-15: VRF 1.1.0: replace uname/hostname syscalls, now support for FQDN via $use_fqdn, other fixes [Patrick Van der Veken]
-@(#) 2015-08-26: VRF 1.2.0: replace read of /etc/passwd by pwgetent() call, small and not so small fixes [Patrick Van der Veken]
