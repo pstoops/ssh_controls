@@ -4,11 +4,11 @@ SSH Controls is a light-weight SSH **public key** distribution & management fram
 
 * uses a **desired state** model: SSH Controls *pushes* public keys from a key master (or slave) server onto client host(s) and applies them according to the central configuration.
 
-* uses **SSH** as **transport** mechanism: eat your own dogfood. SSH Controls connects to client hosts through the secure path of SSH and using a public key that is under its own control.
+* uses **SSH** as **transport** mechanism: eat your own dog food. SSH Controls connects to client hosts through the secure path of SSH and using a public key that is under its own control.
 
 * supports a **Master→Slave→Client** model so that information can be propagated within more complex LAN set-ups.
 
-* **shields** public keys from owners/users on client systems: SSH Controls requires the standard sshd_config to be reconfigured with an alternate path for the AuthorizedKeysFile setting so that public keys are stored in common location which cannot be manipulated by the owners of the public keys. This allows for more administrative control and better security.
+* **shields** public keys from owners/users on client systems: SSH Controls requires the standard `sshd_config` to be reconfigured with an alternate path for the `AuthorizedKeysFile` setting so that public keys are stored in common location which cannot be manipulated by the owners of the public keys. This allows for more administrative control and better security.
 
 * performs operations with **least privileges**: copy/distribute operations are performed with a low-privileged account. Only the actual key updates requires super-user privileges which need to be configured via SUDO.
 
@@ -18,7 +18,7 @@ SSH Controls is a light-weight SSH **public key** distribution & management fram
 
 * allows the use of (nested) **groups** in the master configuration: users, keys and hosts can be grouped in the SSH master configuration files to allow a simplified configuration. Nesting of groups is allowed up to *5 levels* deep.
 
-* allow the use of (nested) **groups** in the specification of the *push* targets. Either via the --targets command-line parameter or via the `targets` configuration file.
+* allow the use of (nested) **groups** in the specification of the *push* targets. Either via the `--targets` command-line parameter or via the `targets` configuration file.
 
 * allows compromised public keys to be **blacklisted**: SSH Controls will deny the use of public keys that have been administrative blacklisted. Blacklisting happens on the SSH master and is applied to all client hosts.
 
