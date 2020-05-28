@@ -43,7 +43,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the version (YYYY-MM-DD)
-typeset -r SCRIPT_VERSION="2018-11-03"
+typeset -r SCRIPT_VERSION="2020-05-28"
 # name of the global configuration file (script)
 typeset -r GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -734,7 +734,7 @@ else
 fi
 # discover a keys blacklist file, also copy it across if we find one
 # never use a keys blacklist file from the local config though
-[[ -r ${LOCAL_DIR}/keyupdate.conf ]] && \
+[[ -r ${LOCAL_DIR}/update_ssh.conf ]] && \
     BLACKLIST_FILE="$(grep -E -e '^blacklist_file' ${LOCAL_DIR}/update_ssh.conf 2>/dev/null | cut -f2 -d'=')"
 if [[ -n "${BLACKLIST_FILE}" ]]
 then
@@ -1257,7 +1257,7 @@ typeset OLD_PWD=""
 typeset SFTP_RC=0
 
 # find the local directory & permission bits
-TRANSFER_DIR="${TRANSFER_FILE%/*}"
+TRANSFER_DIR=$(dirname "${TRANSFER_FILE%%!*}")
 TRANSFER_PERMS="${TRANSFER_FILE##*!}"
 # cut out the permission bits and the directory path
 TRANSFER_FILE="${TRANSFER_FILE%!*}"
