@@ -1,5 +1,14 @@
 <p align="center"><img src="logo.png" alt="SSH Controls Logo"></p>
 
+## What's new
+
+:loudspeaker: **30/12/2020**:
+* added support for standard home directory location for public keys (`$HOME/.ssh`). Set `$key_location=use_sshd` in `update_ssh.conf[.local]` with `AuthorizedKeysFile` set to the default value in `sshd_config` (or use the value `.ssh/authorized_keys`). *Caveat*: SSH Controls will not create parent nor intermediate directories in the public key file path if they are missing.
+* added support for SELinux (CentOS/RHEL 8.x)
+* various fixes
+
+## About
+
 SSH Controls is a light-weight SSH **public key** distribution & management framework
 
 * uses a **desired state** model: SSH Controls *pushes* public keys from a key master (or slave) server onto client host(s) and applies them according to the central configuration.
@@ -8,7 +17,7 @@ SSH Controls is a light-weight SSH **public key** distribution & management fram
 
 * supports a **Master→Slave→Client** model so that information can be propagated within more complex LAN set-ups.
 
-* **shields** public keys from owners/users on client systems: SSH Controls requires the standard `sshd_config` to be reconfigured with an alternate path for the `AuthorizedKeysFile` setting so that public keys are stored in common location which cannot be manipulated by the owners of the public keys. This allows for more administrative control and better security.
+* can **shield** public keys from owners/users on client systems: SSH Controls may require the standard `sshd_config` to be reconfigured with an alternate path for the `AuthorizedKeysFile` setting so that public keys are stored in common location which cannot be manipulated by the owners of the public keys. This allows for more administrative control and better security.
 
 * performs operations with **least privileges**: copy/distribute operations are performed with a low-privileged account. Only the actual key updates requires super-user privileges which need to be configured via SUDO.
 

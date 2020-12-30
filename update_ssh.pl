@@ -42,7 +42,7 @@ use Pod::Usage;
 
 # ------------------------- CONFIGURATION starts here -------------------------
 # define the version (YYYY-MM-DD)
-my $script_version = "2018-11-03";
+my $script_version = "2020-12-30";
 # name of global configuration file (no path, must be located in the script directory)
 my $global_config_file = "update_ssh.conf";
 # name of localized configuration file (no path, must be located in the script directory)
@@ -52,13 +52,18 @@ my $max_recursion = 5;
 # selinux context labels of key files for different RHEL version
 my %selinux_contexts = ( '5' => 'sshd_key_t',
                          '6' => 'ssh_home_t',
-                         '7' => 'ssh_home_t');
+                         '7' => 'ssh_home_t',
+                         '8' => 'ssh_home_t');
+# disallowed paths for home directories for accounts
+my @disallowed_homes = ('/', '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin');
+# disallowed login shells for @accounts
+my @disallowed_shells = ('/bin/nologin','/bin/false','/sbin/nologin','/sbin/false');
 # ------------------------- CONFIGURATION ends here ---------------------------
 # initialize variables
 my ($debug, $verbose, $preview, $remove, $global, $use_fqdn) = (0,0,0,0,0,0);
-my (@config_files, @zombie_files, $access_dir, $blacklist_file);
+my (@config_files, @zombie_files, $access_dir, $key_location, $blacklist_file);
 my (%options, @uname, @pwgetent, @accounts, %aliases, %keys, %access, @blacklist);
-my ($os, $hostname, $run_dir);
+my ($os, $hostname, $run_dir, $authorizedkeys_option);
 my ($selinux_status, $selinux_context, $linux_version, $has_selinux, $recursion_count) = ("","","",0,1);
 $|++;
 
@@ -89,7 +94,7 @@ sub parse_config_file {
     my $config_file = shift;
 
     unless (open (CONF_FD, "<", $config_file)) {
-        do_log ("ERROR: failed to open the configuration file ${config_file} [$! $hostname]")
+        do_log ("ERROR: failed to open the configuration file ${config_file} [$!/$hostname]")
         and exit (1);
     }
     while (<CONF_FD>) {
@@ -98,13 +103,22 @@ sub parse_config_file {
         if (/^\s*$/ || /^#/) {
             next;
         } else {
-            if (/^\s*use_fqdn\s*=\s*([0-9]+)\s*$/) {
+            if (/^\s*use_fqdn\s*=\s*(0|1)\s*$/) {
                 $use_fqdn = $1;
                 do_log ("DEBUG: picking up setting: use_fqdn=${use_fqdn}");
             }
             if (/^\s*access_dir\s*=\s*([0-9A-Za-z_\-\.\/~]+)\s*$/) {
                 $access_dir = $1;
                 do_log ("DEBUG: picking up setting: access_dir=${access_dir}");
+            }
+            if (/^\s*key_location\s*=\s*(use_controls|use_sshd)\s*/) {
+                $key_location = $1;
+                do_log ("DEBUG: picking up setting: key_location=${key_location}");
+                if ($key_location eq 'use_sshd') {
+                    do_log ("DEBUG: applied setting: key_location=${key_location}");
+                } else {
+                    do_log ("DEBUG: applied default setting: key_location=${key_location}");
+                }
             }
             if (/^\s*blacklist_file\s*=\s*([0-9A-Za-z_\-\.\/~]+)\s*$/) {
                 $blacklist_file = $1;
@@ -151,10 +165,10 @@ sub set_file {
     my ($file, $perm, $uid, $gid) = @_;
 
     chmod ($perm, "$file")
-        or do_log ("ERROR: cannot set permissions on $file [$! $hostname]")
+        or do_log ("ERROR: cannot set permissions on $file [$!/$hostname]")
         and exit (1);
     chown ($uid, $gid, "$file")
-        or do_log ("ERROR: cannot set ownerships on $file [$! $hostname]")
+        or do_log ("ERROR: cannot set ownerships on $file [$!/$hostname]")
         and exit (1);
 
     return (1);
@@ -228,7 +242,7 @@ $verbose = 1 if ($options{'verbose'});
 
 # where am I? (1/2)
 $0 =~ /^(.+[\\\/])[^\\\/]+[\\\/]*$/;
-my $run_dir = $1 || ".";
+$run_dir = $1 || ".";
 $run_dir =~ s#/$##;     # remove trailing slash
 
 # don't do anything without configuration file(s)
@@ -245,14 +259,19 @@ foreach my $config_file (@config_files) {
     parse_config_file ($config_file);
 }
 
-# is the target directory for keys present? (not for global preview)
-unless ($preview and $global) {
-    do_log ("INFO: checking for SSH control mode ...");
+# is the target directory for keys present? (not for global preview and
+# not when $key_location is use_sshd)
+unless (($preview and $global) or $key_location eq 'use_sshd') {
+    do_log ("INFO: checking for SSH controls mode ...");
     if (-d $access_dir) {
-        do_log ("INFO: host is under SSH control via $access_dir");
+        do_log ("INFO: host is under SSH controls via $access_dir");
     } else {
-        do_log ("ERROR: host is not under SSH keys only control [$hostname]")
-        and exit (1);
+        if ($key_location eq 'use_sshd') {
+            do_log ("INFO: skipped check since public key location is determined by sshd [$hostname]")
+        } else {
+            do_log ("ERROR: host is not under SSH keys only control [$hostname]")
+            and exit (1);
+        }
     }
 }
 
@@ -261,7 +280,7 @@ unless ($preview and $global) {
     do_log ("INFO: checking for keys blacklist file ...");
     if (-f $blacklist_file) {
         open (BLACKLIST, "<", $blacklist_file) or \
-            do_log ("ERROR: cannot read keys blacklist file [$! $hostname]")
+            do_log ("ERROR: cannot read keys blacklist file [$!/$hostname]")
                 and exit (1);
         @blacklist = <BLACKLIST>;
         close (BLACKLIST);
@@ -292,6 +311,28 @@ if ($use_fqdn) {
 do_log ("INFO: runtime info: ".getpwuid ($<)."; ${hostname}\@${run_dir}; Perl v$]");
 
 # -----------------------------------------------------------------------------
+# resolve and check key location
+# -----------------------------------------------------------------------------
+if ($key_location eq 'use_sshd') {
+
+    # get sshd setting but only take 1st path into account
+    $authorizedkeys_option = qx#sshd -T | grep "authorizedkeysfile" 2>/dev/null | cut -f2 -d' '#;
+    chomp ($authorizedkeys_option);
+    if (defined ($authorizedkeys_option)) {
+        do_log ("INFO: AuthorizedkeysFile resolves to $authorizedkeys_option [$hostname]");
+    } else {
+        do_log ("ERROR: unable to get AuthorizedkeysFile value from sshd [$hostname]")
+        and exit (1);
+    }
+} else {
+    # for SSH controls native logic we require an absolute path
+    if ($authorizedkeys_option =~ /^\//) {
+        do_log ("ERROR: option \$access_dir requires and absolute path [$hostname]")
+        and exit (1);
+    }
+}
+
+# -----------------------------------------------------------------------------
 # collect user accounts via getpwent()
 # result: @accounts
 # -----------------------------------------------------------------------------
@@ -319,7 +360,7 @@ print Dumper (\@accounts) if $debug;
 do_log ("INFO: reading 'alias' file ...");
 
 open (ALIASES, "<", "${run_dir}/alias")
-    or do_log ("ERROR: cannot read 'alias' file [$! $hostname]") and exit (1);
+    or do_log ("ERROR: cannot read 'alias' file [$!/$hostname]") and exit (1);
 while (<ALIASES>) {
 
     my ($key, $value, @values);
@@ -398,7 +439,7 @@ if (-d "${run_dir}/keys.d" && -f "${run_dir}/keys") {
 if (-d "${run_dir}/keys.d") {
     do_log ("INFO: local 'keys' are stored in a DIRECTORY on $hostname");
     opendir (KEYS_DIR, "${run_dir}/keys.d")
-        or do_log ("ERROR: cannot open 'keys.d' directory [$! $hostname]")
+        or do_log ("ERROR: cannot open 'keys.d' directory [$!/$hostname]")
         and exit (1);
     while (my $key_file = readdir (KEYS_DIR)) {
         next if ($key_file =~ /^\./);
@@ -416,7 +457,7 @@ if (-d "${run_dir}/keys.d") {
 # process 'keys' files
 foreach my $key_file (@key_files) {
     open (KEYS, "<", $key_file)
-        or do_log ("ERROR: cannot read 'keys' file [$! $hostname]") and exit (1);
+        or do_log ("ERROR: cannot read 'keys' file [$!/$hostname]") and exit (1);
     do_log ("INFO: reading public keys from file: $key_file");
     while (<KEYS>) {
 
@@ -454,7 +495,7 @@ print Dumper(\%keys) if $debug;
 do_log ("INFO: reading 'access' file ...");
 
 open (ACCESS, "<", "${run_dir}/access")
-    or do_log ("ERROR: cannot read 'access' file [$! $hostname]") and exit (1);
+    or do_log ("ERROR: cannot read 'access' file [$!/$hostname]") and exit (1);
 while (<ACCESS>) {
 
     my ($who, $where, $what, @who, @where, @what);
@@ -507,7 +548,7 @@ if ($preview && $global) {
     do_log ("INFO: display GLOBAL configuration ....");
 
     open (ACCESS, "<", "${run_dir}/access")
-        or do_log ("ERROR: cannot read 'access' file [$! $hostname]") and exit (1);
+        or do_log ("ERROR: cannot read 'access' file [$!/$hostname]") and exit (1);
     while (<ACCESS>) {
 
         my ($who, $where, $what, @who, @where, @what);
@@ -542,7 +583,8 @@ if ($preview && $global) {
 }
 
 # -----------------------------------------------------------------------------
-# distribute keys into authorized_keys files in $access_dir
+# distribute keys into authorized_keys files
+# (defined by $key_location and/or $access_dir)
 # -----------------------------------------------------------------------------
 
 do_log ("INFO: applying SSH access rules ....");
@@ -578,6 +620,10 @@ unless ($preview) {
                         $linux_version = 7;
                         last SWITCH_RELEASE;
                     };
+                    $release_string =~ m/release 8/i && do {
+                        $linux_version = 8;
+                        last SWITCH_RELEASE;
+                    };
                 }
             }
             # use fall back in case we cannot determine the version
@@ -599,17 +645,50 @@ unless ($preview) {
 
 # only add authorized_keys for existing accounts,
 # otherwise revoke access if needed
-foreach my $account (sort (@accounts)) {
+SET_KEY: foreach my $account (sort (@accounts)) {
 
-    my $access_file = "$access_dir/$account";
+    my ($access_file, $authorizedkeys_file, $uid, $gid, $home_dir, $login_shell) = (undef, undef, undef, undef, undef, undef);
+
+    # set $access_file when using SSH controls logic
+    if ($key_location eq 'use_sshd' and defined ($authorizedkeys_option)) {
+        # use sshd logic (replacing %u,%h, %%)
+        $authorizedkeys_file = $authorizedkeys_option;
+        $authorizedkeys_file =~ s/%u/$account/g;
+        $authorizedkeys_file =~ s/%h/$hostname/g;
+        $authorizedkeys_file =~ s/%%/%/g;
+        # check relative path (assume $HOME needs to be added)
+        if ($authorizedkeys_file !~ /^\//) {
+            ($uid, $gid, $home_dir, $login_shell) = (getpwnam($account))[2,3,7,8];
+            # do not accept invalid $HOME or shells
+            if (defined ($home_dir)) {
+                if (grep( /^$home_dir$/, @disallowed_homes) or grep( /^$login_shell/, @disallowed_shells)) {
+                    do_log ("DEBUG: invalid HOME or SHELL for $account [$hostname]");
+                    next SET_KEY;
+                } else {
+                    $authorizedkeys_file = $home_dir."/".$authorizedkeys_file;
+                    do_log ("DEBUG: adding $home_dir to public key path for $account [$hostname]");
+                }
+            } else {
+                do_log ("ERROR: unable to get HOME for $account [$hostname]");
+                next SET_KEY;
+            }
+        }
+        $access_file = $authorizedkeys_file;
+    } else {
+        # use native SSH controls logic
+        $access_file = "$access_dir/$account";
+    }
+    do_log ("DEBUG: public key location for $account resolves to $authorizedkeys_file [$hostname]");
 
     # only add authorised_keys if there are access definitions
     if ($access{$account}) {
 
         unless ($preview) {
+            # do not create root or intermediate paths in $access_file;
+            # e.g. if $HOME/.ssh/authorized_keys is the public key path, then $HOME/.ssh must already exist
             open (KEYFILE, "+>", $access_file)
-                or do_log ("ERROR: cannot open file for writing in $access_dir [$! $hostname]")
-                and exit (1);
+                or do_log ("ERROR: cannot open file for writing at $access_file [$!/$hostname]")
+                and next SET_KEY;
         }
         foreach my $person (sort (@{$access{$account}})) {
             my $real_name = $person;
@@ -626,9 +705,13 @@ foreach my $account (sort (@accounts)) {
         }
         close (KEYFILE) unless $preview;
 
-        # set permissions to world readable and check for SELinux context
+        # set ownerships/permissions on public key file and check for SELinux context
         unless ($preview) {
-            set_file ($access_file, 0644, 0, 0);
+            if ($key_location eq 'use_controls') {
+                set_file ($access_file, 0644, 0, 0);
+            } else {
+                set_file ($access_file, 0600, $uid, $gid);
+            }
             # selinux labels
             SWITCH: {
                 $os eq "Linux" && do {
@@ -645,7 +728,7 @@ foreach my $account (sort (@accounts)) {
         if (-f $access_file) {
             unless ($preview) {
                 unlink ($access_file)
-                or do_log ("ERROR: cannot remove obsolete access file(s) [$! $hostname]")
+                or do_log ("ERROR: cannot remove obsolete access file $access_file [$!/$hostname]")
                 and exit (1);
             } else {
                 do_log ("INFO: removing obsolete access $access_file on $hostname");
@@ -655,32 +738,35 @@ foreach my $account (sort (@accounts)) {
 }
 
 # -----------------------------------------------------------------------------
-# alert on/remove extraneous authorized_keys files
+# alert on/remove extraneous authorized_keys files (SSH controls logic only)
 # (access files for which no longer a valid UNIX account exists)
 # -----------------------------------------------------------------------------
 
-do_log ("INFO: checking for extraneous access files ....");
+if ($key_location eq 'use_controls') {
 
-opendir (ACCESS_DIR, $access_dir)
-    or do_log ("ERROR: cannot open directory $access_dir [$! $hostname]")
+    do_log ("INFO: checking for extraneous access files ....");
+
+    opendir (ACCESS_DIR, $access_dir)
+        or do_log ("ERROR: cannot open directory $access_dir [$!/$hostname]")
     and exit (1);
-while (my $access_file = readdir (ACCESS_DIR)) {
-    next if ($access_file =~ /^\./);
-    unless (grep (/$access_file/, @accounts)) {
-        do_log ("WARN: found extraneous access file in $access_dir/$access_file [$hostname]");
-        push (@zombie_files, "$access_dir/$access_file");
+    while (my $access_file = readdir (ACCESS_DIR)) {
+        next if ($access_file =~ /^\./);
+        unless (grep (/$access_file/, @accounts)) {
+            do_log ("WARN: found extraneous access file in $access_dir/$access_file [$hostname]");
+            push (@zombie_files, "$access_dir/$access_file");
+        }
     }
-}
-closedir (ACCESS_DIR);
-do_log ("INFO: ".scalar (@zombie_files)." extraneous access file(s) found on $hostname");
-print Dumper (\@zombie_files) if $debug;
+    closedir (ACCESS_DIR);
+    do_log ("INFO: ".scalar (@zombie_files)." extraneous access file(s) found on $hostname");
+    print Dumper (\@zombie_files) if $debug;
 
-# remove if requested and needed
-if ($remove && @zombie_files) {
-    my $count = unlink (@zombie_files)
-        or do_log ("ERROR: cannot remove extraneous access file(s) [$! $hostname]")
-        and exit (1);
-    do_log ("INFO: $count extraneous access files removed $hostname");
+    # remove if requested and needed
+    if ($remove && @zombie_files) {
+        my $count = unlink (@zombie_files)
+            or do_log ("ERROR: cannot remove extraneous access file(s) [$!/$hostname]")
+            and exit (1);
+            do_log ("INFO: $count extraneous access files removed $hostname");
+    }
 }
 
 exit (0);
@@ -711,9 +797,11 @@ update_ssh.pl - distributes SSH public keys in a desired state model.
 =head1 DESCRIPTION
 
 B<update_ssh.pl> distributes SSH keys to the appropriate files (.e. 'authorized_keys') into the C<$access_dir> repository based on the F<access>, F<alias> and F<keys> files.
+Alternatively B<update_ssh.pl> can distribute public keys to the location specified in the AuthorizedkeysFile setting of F<sshd_config> (allowing public keys to be distributed
+to the traditional location in a user's HOME directory). See C<key_location> setting in F<update_ssh.conf[.local]>for more information.
 This script should be run on each host where SSH key authentication is the exclusive method of (remote) authentication.
 
-For update SSH public keys must be stored in a generic F<keys> file within the same directory as B<update_ssh.pl> script.
+Orginally SSH public keys must be stored in a generic F<keys> file within the same directory as B<update_ssh.pl> script.
 Alternatively key files may be stored as set of individual key files within a called sub-directory called F<keys.d>.
 Both methods are mutually exclusive and the latter always take precedence.
 
@@ -739,6 +827,8 @@ Following settings must be configured:
 
 =item * B<access_dir>     : target directory for allowed SSH public key files
 
+=item * B<key_location>   : whether or not to use AuthorizedkeysFile setting in sshd_config for overriding $access_dir
+
 =item * B<blacklist_file> : location of the file with blacklisted SSH public keys
 
 =back
@@ -746,7 +836,7 @@ Following settings must be configured:
 =head1 BLACKLISTING
 
 Key blacklisting can be performed by adding a public key definition in its entirety to the blacklist keys file. When a blacklisted key is
-found in the available F<keys> file(s) during SSH control updates, an alert will be shown on STDOUT and the key will be ignored for the rest.
+found in the available F<keys> file(s) during SSH controls updates, an alert will be shown on STDOUT and the key will be ignored for the rest.
 
 Examples:
 
