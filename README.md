@@ -3,7 +3,7 @@
 ## What's new
 
 :loudspeaker: **30/12/2020**:
-* added support for standard home directory location for public keys (`$HOME/.ssh`). Set `$key_location=use_sshd` in `update_ssh.conf[.local]` with `AuthorizedKeysFile` set to the default value in `sshd_config` (or use the value `.ssh/authorized_keys`). *Caveat*: SSH Controls will not create parent nor intermediate directories in the public key file path if they are missing.
+* added support for standard home directory location for public keys (`$HOME/.ssh`). Set `key_location=use_sshd` in `update_ssh.conf[.local]` with `AuthorizedKeysFile` set to the default value in `sshd_config` (or use the value `.ssh/authorized_keys`). *Caveat*: SSH Controls will not create parent nor intermediate directories in the public key file path if they are missing.
 * added support for SELinux (CentOS/RHEL 8.x)
 * various fixes
 
