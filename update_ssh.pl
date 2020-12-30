@@ -58,10 +58,12 @@ my %selinux_contexts = ( '5' => 'sshd_key_t',
 my @disallowed_homes = ('/', '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin');
 # disallowed login shells for @accounts
 my @disallowed_shells = ('/bin/nologin','/bin/false','/sbin/nologin','/sbin/false');
+# default toggle for key location
+my $key_location='use_controls';
 # ------------------------- CONFIGURATION ends here ---------------------------
 # initialize variables
 my ($debug, $verbose, $preview, $remove, $global, $use_fqdn) = (0,0,0,0,0,0);
-my (@config_files, @zombie_files, $access_dir, $key_location, $blacklist_file);
+my (@config_files, @zombie_files, $access_dir, $blacklist_file);
 my (%options, @uname, @pwgetent, @accounts, %aliases, %keys, %access, @blacklist);
 my ($os, $hostname, $run_dir, $authorizedkeys_option);
 my ($selinux_status, $selinux_context, $linux_version, $has_selinux, $recursion_count) = ("","","",0,1);
@@ -116,8 +118,6 @@ sub parse_config_file {
                 do_log ("DEBUG: picking up setting: key_location=${key_location}");
                 if ($key_location eq 'use_sshd') {
                     do_log ("DEBUG: applied setting: key_location=${key_location}");
-                } else {
-                    do_log ("DEBUG: applied default setting: key_location=${key_location}");
                 }
             }
             if (/^\s*blacklist_file\s*=\s*([0-9A-Za-z_\-\.\/~]+)\s*$/) {
@@ -330,6 +330,7 @@ if ($key_location eq 'use_sshd') {
         do_log ("ERROR: option \$access_dir requires and absolute path [$hostname]")
         and exit (1);
     }
+    do_log ("DEBUG: applied default setting: key_location=${key_location}");
 }
 
 # -----------------------------------------------------------------------------
@@ -678,7 +679,7 @@ SET_KEY: foreach my $account (sort (@accounts)) {
         # use native SSH controls logic
         $access_file = "$access_dir/$account";
     }
-    do_log ("DEBUG: public key location for $account resolves to $authorizedkeys_file [$hostname]");
+    do_log ("DEBUG: public key location for $account resolves to $access_file [$hostname]");
 
     # only add authorised_keys if there are access definitions
     if ($access{$account}) {
