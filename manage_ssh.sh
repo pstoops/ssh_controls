@@ -43,7 +43,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the version (YYYY-MM-DD)
-typeset -r SCRIPT_VERSION="2020-12-30"
+typeset -r SCRIPT_VERSION="2021-01-09"
 # name of the global configuration file (script)
 typeset -r GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -89,6 +89,7 @@ typeset KEY_COUNT=0
 typeset KEY_1024_COUNT=0
 typeset KEY_2048_COUNT=0
 typeset KEY_4096_COUNT=0
+typeset KEY_BAD_COUNT=0
 typeset KEY_OTHER_COUNT=0
 typeset RESOLVE_ALIAS=""
 typeset SSH_KEYGEN_OPTS=""
@@ -530,7 +531,15 @@ typeset CHECK_LINE="$1"
 typeset CHECK_DELIM="$2"
 typeset NUM_FIELDS=0
 
-NUM_FIELDS=$(print "${CHECK_LINE}" | awk -F "${CHECK_DELIM}" '{ print NF }' 2>/dev/null)
+case "${OS_NAME}" in
+    HP-UX)
+        # wark around old awk's limit on input of max 3000 bytes
+        NUM_FIELDS=$(print "${CHECK_LINE}" | tr "${CHECK_DELIM}" '\n' 2>/dev/null | wc -l 2>/dev/null)
+        ;;
+    *)
+        NUM_FIELDS=$(print "${CHECK_LINE}" | awk -F "${CHECK_DELIM}" '{ print NF }' 2>/dev/null)
+        ;;
+esac
 
 print "${NUM_FIELDS}"
 
@@ -1492,6 +1501,7 @@ function update_fingerprints
 typeset FINGER_LINE="$1"
 typeset FINGER_FIELDS=0
 typeset FINGER_USER=""
+typeset FINGER_TYPE=""
 typeset FINGERPRINT=""
 typeset FINGER_RC=0
 
@@ -1500,7 +1510,11 @@ typeset FINGER_RC=0
 
 # line should have 3 fields
 FINGER_FIELDS=$(count_fields "${FINGER_LINE}" ",")
-(( FINGER_FIELDS != 3 )) && die "line '${FINGER_LINE}' has missing or too many field(s) (should be 3))"
+if (( FINGER_FIELDS != 3 ))
+then
+    warn "line '${FINGER_LINE}' has missing or too many field(s) (should be 3))"
+    return 1
+fi
 
 # create fingerprint
 FINGER_USER=$(print "${FINGER_LINE}" | awk -F, '{print $1}')
@@ -1510,20 +1524,33 @@ FINGERPRINT=$(ssh-keygen ${SSH_KEYGEN_OPTS} -l -f "${TMP_FILE}" 2>&1)
 FINGER_RC=$?
 if (( FINGER_RC == 0 ))
 then
-    case "${OS_NAME}" in
-        HP-UX)
-            # shellcheck disable=SC2086
-            FINGER_ENTRY="$(print ${FINGERPRINT} | awk '{print $1,$2,$4}')"
+    case "${FINGERPRINT}" in
+        *\(RSA\)*)
+            FINGER_TYPE="RSA"
+            ;;
+        *\(DSA\)*)
+            FINGER_TYPE="DSA"
+            ;;
+        *\(ECDSA\)*)
+            FINGER_TYPE="ECDSA"
+            ;;
+        *\(ED25519\)*)
+            FINGER_TYPE="ED25519"
             ;;
         *)
-            # shellcheck disable=SC2086
-            FINGER_ENTRY="$(print ${FINGERPRINT} | awk '{print $1,$2,$5}')"
+            FINGER_TYPE="UNKNOWN"
             ;;
     esac
-    log "${FINGER_USER}->${FINGER_ENTRY}"
-    print "${FINGER_USER} ${FINGER_ENTRY}" >> "${LOCAL_DIR}/fingerprints"
+
+    # shellcheck disable=SC2086
+    FINGER_ENTRY="$(print ${FINGERPRINT} | awk '{print $1,$2}')"
+
+    log "${FINGER_USER}->${FINGER_ENTRY} (${FINGER_TYPE})"
+    print "${FINGER_USER} ${FINGER_ENTRY} (${FINGER_TYPE})" >> "${LOCAL_DIR}/fingerprints"
 else
-    die "failed to obtain fingerprint for key ${FINGER_LINE} [RC=${FINGER_RC}]"
+    warn "failed to obtain fingerprint for key ${FINGER_LINE} [RC=${FINGER_RC}]"
+    KEY_BAD_COUNT=$(( KEY_BAD_COUNT + 1 ))
+    return 1
 fi
 # check bit count
 case "${FINGERPRINT}" in
@@ -2010,22 +2037,26 @@ case ${ARG_ACTION} in
         # are keys stored in a file or a directory?
         if [[ -n "${KEYS_DIR}" ]]
         then
-            cat "${KEYS_DIR}"/* | sort | while read -r LINE
+            cat "${KEYS_DIR}"/* | grep -v -E -e '^#' -e '^$' 2>/dev/null | sort 2>/dev/null |\
+                while read -r LINE
             do
                 update_fingerprints "${LINE}"
                 KEY_COUNT=$(( KEY_COUNT + 1 ))
             done
         else
+            grep -v -E -e '^#' -e '^$' "${KEYS_FILE}" 2>/dev/null | sort 2>/dev/null |\
             while read -r LINE
             do
                 update_fingerprints "${LINE}"
-            done < "${KEYS_FILE}"
+                KEY_COUNT=$(( KEY_COUNT + 1 ))
+            done
         fi
         log "${KEY_COUNT} public keys discovered with following bits distribution:"
         log "   1024 bits: ${KEY_1024_COUNT}"
         log "   2048 bits: ${KEY_2048_COUNT}"
         log "   4096 bits: ${KEY_4096_COUNT}"
         log "   others   : ${KEY_OTHER_COUNT}"
+        log "   bad      : ${KEY_BAD_COUNT}"
         log "finished updating public key fingerprints"
         ;;
     4)  # apply SSH controls locally (root user)
