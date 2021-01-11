@@ -43,7 +43,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the version (YYYY-MM-DD)
-typeset -r SCRIPT_VERSION="2021-01-09"
+typeset -r SCRIPT_VERSION="2021-01-11"
 # name of the global configuration file (script)
 typeset -r GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
@@ -1179,7 +1179,8 @@ then
 fi
 
 # expand alias line into individual aliases
-for ALIAS in ${ALIASES_LINE//,/ }
+# do not use variable substition (>=ksh93) instead use the uglier 'tr' solution
+for ALIAS in $(print "${ALIASES_LINE}" | tr ',' ' ' 2>/dev/null)
 do
     # recurse if the alias is a group
     IS_ALIAS=$(print "${ALIAS}" | grep -c -E -e '^\@' 2>/dev/null)
