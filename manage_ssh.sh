@@ -1179,8 +1179,9 @@ then
 fi
 
 # expand alias line into individual aliases
-# do not use variable substition (>=ksh93) instead use the uglier 'tr' solution
-for ALIAS in $(print "${ALIASES_LINE}" | tr ',' ' ' 2>/dev/null)
+# do not use variable substition (>=ksh93) instead use the uglier while loop solution
+# (hint: don't use a for loop as aliases may contain spaces!)
+print "${ALIASES_LINE}"| while IFS=',' read -r ALIAS
 do
     # recurse if the alias is a group
     IS_ALIAS=$(print "${ALIAS}" | grep -c -E -e '^\@' 2>/dev/null)
