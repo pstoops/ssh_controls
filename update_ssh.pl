@@ -2,17 +2,6 @@
 #******************************************************************************
 # @(#) update_ssh.pl
 #******************************************************************************
-# @(#) Copyright (C) 2014 by KUDOS BVBA <info@kudos.be>.  All rights reserved.
-#
-# This program is a free software; you can redistribute it and/or modify
-# it under the same terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful, but WITHOUT
-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details
-#******************************************************************************
 # This script distributes SSH keys to the appropriate files into the designated
 # repository based on the 'access', 'alias' and 'keys' configuration files.
 # Superfluous usage of 'hostname' reporting in log messages is encouraged to
@@ -42,7 +31,7 @@ use Pod::Usage;
 
 # ------------------------- CONFIGURATION starts here -------------------------
 # define the version (YYYY-MM-DD)
-my $script_version = "2020-12-30";
+my $script_version = "2021-01-12";
 # name of global configuration file (no path, must be located in the script directory)
 my $global_config_file = "update_ssh.conf";
 # name of localized configuration file (no path, must be located in the script directory)
@@ -275,22 +264,6 @@ unless (($preview and $global) or $key_location eq 'use_sshd') {
     }
 }
 
-# do we have a blacklist file? (optional) (not for global preview)
-unless ($preview and $global) {
-    do_log ("INFO: checking for keys blacklist file ...");
-    if (-f $blacklist_file) {
-        open (BLACKLIST, "<", $blacklist_file) or \
-            do_log ("ERROR: cannot read keys blacklist file [$!/$hostname]")
-                and exit (1);
-        @blacklist = <BLACKLIST>;
-        close (BLACKLIST);
-        do_log ("INFO: keys blacklist file found with ".scalar (@blacklist)." entr(y|ies) on $hostname");
-        print Dumper (\@blacklist) if $debug;
-    } else {
-        do_log ("WARN: no keys blacklist file found [$hostname]");
-    }
-}
-
 # what am I?
 @uname = uname();
 $os = $uname[0];
@@ -309,6 +282,26 @@ if ($use_fqdn) {
 }
 
 do_log ("INFO: runtime info: ".getpwuid ($<)."; ${hostname}\@${run_dir}; Perl v$]");
+
+# -----------------------------------------------------------------------------
+# handle blacklist file
+# -----------------------------------------------------------------------------
+
+# do we have a blacklist file? (optional) (not for global preview)
+unless ($preview and $global) {
+    do_log ("INFO: checking for keys blacklist file ...");
+    if (-f $blacklist_file) {
+        open (BLACKLIST, "<", $blacklist_file) or \
+            do_log ("ERROR: cannot read keys blacklist file [$!/$hostname]")
+                and exit (1);
+        @blacklist = <BLACKLIST>;
+        close (BLACKLIST);
+        do_log ("INFO: keys blacklist file found with ".scalar (@blacklist)." entr(y|ies) on $hostname");
+        print Dumper (\@blacklist) if $debug;
+    } else {
+        do_log ("WARN: no keys blacklist file found [$hostname]");
+    }
+}
 
 # -----------------------------------------------------------------------------
 # resolve and check key location
