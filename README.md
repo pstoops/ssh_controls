@@ -44,6 +44,6 @@ SSH Controls does NOT:
 
 * manage or distribute SSH **private keys**: SSH private keys should be controlled and managed (and safeguarded!) by the actual owners. Though one could consider SSH key pairs of generic accounts (such as application accounts) as an exception, SSH Controls currently does not support the management of private keys.
 
-More documentation can be found at http://www.kudos.be/Projects/SSH_Controls.html
+More documentation can be found at <http://www.kudos.be/ssh_controls/>
 
 *Logo created with [Free Logo Maker](https://logomakr.com)*
