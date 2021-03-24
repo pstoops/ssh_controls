@@ -967,7 +967,7 @@ then
         *release\ 7*)
             RHEL_VERSION=7
             ;;
-        *release\ 7*)
+        *release\ 8*)
             RHEL_VERSION=8
             ;;
         *)
