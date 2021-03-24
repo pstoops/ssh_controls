@@ -43,7 +43,7 @@
 # or LOCAL_CONFIG_FILE instead
 
 # define the version (YYYY-MM-DD)
-typeset -r SCRIPT_VERSION="2021-01-11"
+typeset -r SCRIPT_VERSION="2023-03-24"
 # name of the global configuration file (script)
 typeset -r GLOBAL_CONFIG_FILE="manage_ssh.conf"
 # name of the local configuration file (script)
